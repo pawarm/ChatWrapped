@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { ConversationsPage } from '@/pages/ConversationsPage';
 import { HomePage } from '@/pages/HomePage';
 import { ImportPage } from '@/pages/ImportPage';
 
@@ -13,6 +14,8 @@ root.render(
       <Route element={<AppLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/import" element={<ImportPage />} />
+        <Route path="/conversations" element={<ConversationsPage />} />
+        <Route path="/conversations/:threadId" element={<ConversationsPage />} />
       </Route>
     </Routes>
   </HashRouter>,

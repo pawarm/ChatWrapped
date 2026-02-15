@@ -2,21 +2,15 @@ import AdmZip from 'adm-zip';
 import fs from 'fs';
 import path from 'path';
 import type Database from 'better-sqlite3';
+import { fixMetaEncoding } from '../lib/utils';
 import type { ImportProgress, ImportSummary } from '../types/import';
 
 const INBOX_MESSAGE_PATTERN =
   /messages[/\\]inbox[/\\][^/\\]+[/\\]message_(\d+)\.json$/i;
 const ENCRYPTED_MESSAGE_PATTERN =
   /messages[/\\]encrypted[/\\][^/\\]+[/\\]message_(\d+)\.json$/i;
-
-/**
- * Fix Meta's encoding: they JSON-escape UTF-8 bytes as \u00XX, so JSON.parse produces
- * mojibake (e.g. Å› instead of ś). Reinterpret code points as bytes and decode as UTF-8.
- */
-function fixMetaEncoding(str: string): string {
-  if (!str || !/[ÃÅÄ][\u0080-\uFFFF]/.test(str)) return str;
-  return Buffer.from(str, 'latin1').toString('utf-8');
-}
+const E2EE_CUTOVER_MESSAGE_PATTERN =
+  /messages[/\\]e2ee_cutover[/\\][^/\\]+[/\\]message_(\d+)\.json$/i;
 
 interface MetaMessage {
   sender_name?: string;
@@ -50,7 +44,13 @@ function parseMessageFile(zip: AdmZip, entry: AdmZip.IZipEntry): MetaMessageFile
 function extractThreadKey(entryName: string): string {
   const parts = entryName.split(/[/\\]/);
   const threadFolder = parts[parts.length - 2];
-  const parent = parts.includes('inbox') ? 'inbox' : parts.includes('encrypted') ? 'encrypted' : 'unknown';
+  const parent = parts.includes('inbox')
+    ? 'inbox'
+    : parts.includes('encrypted')
+      ? 'encrypted'
+      : parts.includes('e2ee_cutover')
+        ? 'e2ee_cutover'
+        : 'unknown';
   return `${parent}/${threadFolder ?? 'unknown'}`;
 }
 
@@ -66,7 +66,8 @@ function groupEntriesByThread(
   for (const entry of entries) {
     const inboxMatch = entry.entryName.match(INBOX_MESSAGE_PATTERN);
     const encryptedMatch = entry.entryName.match(ENCRYPTED_MESSAGE_PATTERN);
-    const match = inboxMatch ?? encryptedMatch;
+    const e2eeCutoverMatch = entry.entryName.match(E2EE_CUTOVER_MESSAGE_PATTERN);
+    const match = inboxMatch ?? encryptedMatch ?? e2eeCutoverMatch;
     if (!match) continue;
     const threadKey = extractThreadKey(entry.entryName);
     const num = parseInt(match[1], 10);
@@ -110,12 +111,13 @@ export async function importZip(
     (e) =>
       !e.isDirectory &&
       (INBOX_MESSAGE_PATTERN.test(e.entryName) ||
-        ENCRYPTED_MESSAGE_PATTERN.test(e.entryName))
+        ENCRYPTED_MESSAGE_PATTERN.test(e.entryName) ||
+        E2EE_CUTOVER_MESSAGE_PATTERN.test(e.entryName))
   );
 
   if (messageEntries.length === 0) {
     throw new Error(
-      'Unrecognized format. Expected a Meta Messenger export with messages/inbox/*/message_*.json files.'
+      'Unrecognized format. Expected a Meta Messenger export with messages/inbox/, encrypted/, or e2ee_cutover/ message files.'
     );
   }
 
@@ -219,7 +221,7 @@ export async function importZip(
           insertReaction.run(
             messageId,
             fixMetaEncoding(r.actor ?? ''),
-            r.reaction ?? ''
+            fixMetaEncoding(r.reaction ?? '')
           );
           reactionsImported++;
         }

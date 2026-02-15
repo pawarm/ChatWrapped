@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
+    "@tanstack/react-virtual": "^3.13.18",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",
