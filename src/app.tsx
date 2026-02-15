@@ -1,11 +1,19 @@
-import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Button } from '@/components/ui/button';
+import { HashRouter, Routes, Route } from 'react-router-dom';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { HomePage } from '@/pages/HomePage';
+import { ImportPage } from '@/pages/ImportPage';
 
-const root = createRoot(document.getElementById('root')!);
+const rootEl = document.getElementById('root');
+if (!rootEl) throw new Error('Root element not found');
+const root = createRoot(rootEl);
 root.render(
-  <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
-    <h2 className="text-2xl font-semibold">Hello from React!</h2>
-    <Button>shadcn Button</Button>
-  </div>,
+  <HashRouter>
+    <Routes>
+      <Route element={<AppLayout />}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/import" element={<ImportPage />} />
+      </Route>
+    </Routes>
+  </HashRouter>,
 );
