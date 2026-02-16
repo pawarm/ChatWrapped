@@ -28,17 +28,160 @@ function formatTimestamp(ms: number): string {
   });
 }
 
+function displayContent(msg: Message): { text: string; showEditedBadge: boolean } {
+  const content = msg.content ?? '';
+  const hasEditedSuffix = content.endsWith(' (edited)');
+  const text = hasEditedSuffix ? content.slice(0, -9) : content;
+  return { text, showEditedBadge: hasEditedSuffix };
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
+  const specialType = msg.special_type ?? 'generic';
+  const { text: content, showEditedBadge } = displayContent(msg);
+
+  // Group events: centered, muted pill
+  if (specialType === 'group_event') {
+    return (
+      <div className="flex justify-center py-1">
+        <span className="rounded-full bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+          {content || '[System message]'}
+        </span>
+      </div>
+    );
+  }
+
+  // Poll creation: slightly emphasized
+  if (specialType === 'poll_creation') {
+    return (
+      <div className="flex flex-col gap-0.5 rounded-lg border border-muted-foreground/20 bg-muted/30 px-3 py-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium">{msg.sender_name}</span>
+          <span className="text-xs text-muted-foreground">
+            {formatTimestamp(msg.timestamp_ms)}
+            {showEditedBadge && (
+              <span className="ml-1 rounded bg-muted px-1 text-[10px]">edited</span>
+            )}
+          </span>
+        </div>
+        <p className="text-sm break-words whitespace-pre-wrap">
+          {content ? (
+            <>
+              <span className="mr-1.5 text-muted-foreground" aria-hidden>📊</span>
+              {content}
+            </>
+          ) : (
+            <span className="italic text-muted-foreground">[Media]</span>
+          )}
+        </p>
+        {msg.reactions && msg.reactions.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+            {Object.entries(
+              msg.reactions.reduce<Record<string, string[]>>(
+                (acc, { reaction, actor }) => {
+                  if (!acc[reaction]) acc[reaction] = [];
+                  acc[reaction].push(actor);
+                  return acc;
+                },
+                {}
+              )
+            ).map(([r, actors]) => (
+              <span key={r}>{r} {actors.join(', ')}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Poll vote: muted, smaller
+  if (specialType === 'poll_vote') {
+    return (
+      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-1.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs font-medium text-muted-foreground">{msg.sender_name}</span>
+          <span className="text-[10px] text-muted-foreground">
+            {formatTimestamp(msg.timestamp_ms)}
+          </span>
+        </div>
+        <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">
+          {content || '[Media]'}
+        </p>
+      </div>
+    );
+  }
+
+  // Live location: muted with hint
+  if (specialType === 'live_location') {
+    return (
+      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium text-muted-foreground">{msg.sender_name}</span>
+          <span className="text-xs text-muted-foreground">
+            {formatTimestamp(msg.timestamp_ms)}
+            {showEditedBadge && (
+              <span className="ml-1 rounded bg-muted px-1 text-[10px]">edited</span>
+            )}
+          </span>
+        </div>
+        <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+          <span className="mr-1.5" aria-hidden>📍</span>
+          {content || '[Live location]'}
+        </p>
+      </div>
+    );
+  }
+
+  // Share: link icon, standard layout
+  if (specialType === 'share') {
+    return (
+      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium">{msg.sender_name}</span>
+          <span className="text-xs text-muted-foreground">
+            {formatTimestamp(msg.timestamp_ms)}
+            {showEditedBadge && (
+              <span className="ml-1 rounded bg-muted px-1 text-[10px]">edited</span>
+            )}
+          </span>
+        </div>
+        <p className="text-sm break-words whitespace-pre-wrap">
+          <span className="mr-1.5 text-muted-foreground" aria-hidden>🔗</span>
+          {content ?? <span className="italic text-muted-foreground">[Link]</span>}
+        </p>
+        {msg.reactions && msg.reactions.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+            {Object.entries(
+              msg.reactions.reduce<Record<string, string[]>>(
+                (acc, { reaction, actor }) => {
+                  if (!acc[reaction]) acc[reaction] = [];
+                  acc[reaction].push(actor);
+                  return acc;
+                },
+                {}
+              )
+            ).map(([r, actors]) => (
+              <span key={r}>{r} {actors.join(', ')}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Generic / edited (when edited is primary and no other type): standard bubble with edited badge
   return (
     <div className="flex flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
       <div className="flex items-baseline gap-2">
         <span className="text-sm font-medium">{msg.sender_name}</span>
         <span className="text-xs text-muted-foreground">
           {formatTimestamp(msg.timestamp_ms)}
+          {showEditedBadge && (
+            <span className="ml-1 rounded bg-muted px-1 text-[10px]">edited</span>
+          )}
         </span>
       </div>
       <p className="text-sm break-words whitespace-pre-wrap">
-        {msg.content ?? (
+        {content || (
           <span className="italic text-muted-foreground">[Media]</span>
         )}
       </p>

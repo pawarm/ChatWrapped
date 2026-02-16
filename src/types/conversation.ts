@@ -14,6 +14,7 @@ export interface Message {
   timestamp_ms: number;
   content: string | null;
   content_type: string;
+  special_type?: string | null;
   reactions?: { actor: string; reaction: string }[];
 }
 

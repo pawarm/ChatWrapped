@@ -31,6 +31,7 @@ function initSchema(database: Database.Database): void {
       timestamp_ms INTEGER NOT NULL,
       content TEXT,
       content_type TEXT,
+      special_type TEXT,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
       FOREIGN KEY (thread_id) REFERENCES threads(id)
     );
@@ -47,6 +48,20 @@ function initSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp_ms);
     CREATE INDEX IF NOT EXISTS idx_reactions_message_id ON reactions(message_id);
   `);
+  migrateSchema(database);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_special_type ON messages(special_type);
+  `);
+}
+
+function migrateSchema(database: Database.Database): void {
+  const tableInfo = database.prepare('PRAGMA table_info(messages)').all() as {
+    name: string;
+  }[];
+  const hasSpecialType = tableInfo.some((col) => col.name === 'special_type');
+  if (!hasSpecialType) {
+    database.exec('ALTER TABLE messages ADD COLUMN special_type TEXT');
+  }
 }
 
 export function closeDb(): void {

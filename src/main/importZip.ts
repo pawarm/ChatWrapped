@@ -2,6 +2,7 @@ import AdmZip from 'adm-zip';
 import fs from 'fs';
 import path from 'path';
 import type Database from 'better-sqlite3';
+import { classifySpecialMessage } from '../lib/specialMessages';
 import { fixMetaEncoding } from '../lib/utils';
 import type { ImportProgress, ImportSummary } from '../types/import';
 
@@ -17,6 +18,7 @@ interface MetaMessage {
   timestamp_ms?: number;
   content?: string;
   type?: string;
+  share?: unknown;
   reactions?: { reaction?: string; actor?: string }[];
 }
 
@@ -57,6 +59,52 @@ function extractThreadKey(entryName: string): string {
 interface EntryWithSort {
   entry: AdmZip.IZipEntry;
   sortNum: number;
+}
+
+const EDITED_SUFFIX = ' (edited)';
+const EDIT_DEDUP_WINDOW_MS = 60_000;
+
+/**
+ * Meta exports both the original and edited version of a message as separate entries.
+ * Remove originals when we have an edited counterpart (same sender, within time window).
+ */
+function filterEditedDuplicates(messages: MetaMessage[]): MetaMessage[] {
+  if (messages.length === 0) return messages;
+  const byTs = [...messages].sort((a, b) => (a.timestamp_ms ?? 0) - (b.timestamp_ms ?? 0));
+  const toRemove = new Set<number>();
+
+  for (let i = 0; i < byTs.length; i++) {
+    const m = byTs[i];
+    const content = m.content ?? '';
+    if (content.endsWith(EDITED_SUFFIX)) continue; // keep edited
+
+    const sender = m.sender_name ?? '';
+    const ts = m.timestamp_ms ?? 0;
+
+    for (let j = 0; j < byTs.length; j++) {
+      if (i === j) continue;
+      const other = byTs[j];
+      const otherContent = other.content ?? '';
+      if (!otherContent.endsWith(EDITED_SUFFIX)) continue;
+      if ((other.sender_name ?? '') !== sender) continue;
+
+      const otherTs = other.timestamp_ms ?? 0;
+      if (Math.abs(otherTs - ts) > EDIT_DEDUP_WINDOW_MS) continue;
+
+      const editedContent = otherContent.slice(0, -EDITED_SUFFIX.length);
+      const minLen = Math.min(content.length, editedContent.length);
+      let prefixLen = 0;
+      while (prefixLen < content.length && prefixLen < editedContent.length && content[prefixLen] === editedContent[prefixLen]) {
+        prefixLen++;
+      }
+      if (minLen >= 5 && prefixLen >= 0.5 * minLen) {
+        toRemove.add(i);
+        break;
+      }
+    }
+  }
+
+  return byTs.filter((_, i) => !toRemove.has(i));
 }
 
 function groupEntriesByThread(
@@ -140,8 +188,8 @@ export async function importZip(
     DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
   `);
   const insertMessage = database.prepare(`
-    INSERT INTO messages (thread_id, sender_name, timestamp_ms, content, content_type)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO messages (thread_id, sender_name, timestamp_ms, content, content_type, special_type)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
   const insertReaction = database.prepare(`
     INSERT INTO reactions (message_id, actor, reaction)
@@ -201,16 +249,24 @@ export async function importZip(
       deleteReactionsForThread.run(stableThreadId);
       deleteMessages.run(stableThreadId);
 
-      for (const m of allMessages) {
+      const messagesToInsert = filterEditedDuplicates(allMessages);
+
+      for (const m of messagesToInsert) {
         const content = m.content != null ? fixMetaEncoding(String(m.content)) : null;
         const senderName = fixMetaEncoding(m.sender_name ?? 'Unknown');
         const type = m.type ?? 'Generic';
+        const specialType = classifySpecialMessage({
+          content: m.content,
+          type: m.type,
+          share: m.share,
+        });
         insertMessage.run(
           stableThreadId,
           senderName,
           m.timestamp_ms ?? 0,
           content,
-          type
+          type,
+          specialType === 'generic' ? null : specialType
         );
         const row = database.prepare('SELECT last_insert_rowid() as id').get() as {
           id: number;

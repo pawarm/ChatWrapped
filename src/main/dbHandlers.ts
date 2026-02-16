@@ -65,7 +65,7 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
 
       if (!threadId) return [];
 
-      let sql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type
+      let sql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type, special_type
         FROM messages WHERE thread_id = ?`;
       const params: (string | number)[] = [threadId];
 
@@ -135,7 +135,7 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
         999
       ).getTime();
 
-      const sql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type
+      const sql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type, special_type
         FROM messages
         WHERE thread_id = ? AND timestamp_ms >= ? AND timestamp_ms <= ?
         ORDER BY timestamp_ms ASC
