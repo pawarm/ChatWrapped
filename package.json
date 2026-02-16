@@ -1,8 +1,8 @@
 {
-  "name": "messages-overview",
-  "productName": "messages-overview",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "name": "chatwrapped",
+  "productName": "ChatWrapped",
+  "version": "0.1.0",
+  "description": "Local-first desktop app to import and explore your Meta Messenger export",
   "main": ".webpack/main",
   "private": true,
   "scripts": {
@@ -67,5 +67,8 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.0.0",
     "tailwind-merge": "^3.4.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
