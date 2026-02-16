@@ -15,6 +15,7 @@ import { rendererConfig } from './webpack.renderer.config';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    executableName: 'chatwrapped',
     icon: path.join(__dirname, 'assets', 'app-logo'),
   },
   rebuildConfig: {},
