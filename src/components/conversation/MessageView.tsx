@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/conversation';
 
 const MESSAGE_LIMIT = 50;
@@ -53,7 +53,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   // Poll creation: slightly emphasized
   if (specialType === 'poll_creation') {
     return (
-      <div className="flex flex-col gap-0.5 rounded-lg border border-muted-foreground/20 bg-muted/30 px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-muted-foreground/20 bg-muted/30 px-3 py-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium">{msg.sender_name}</span>
           <span className="text-xs text-muted-foreground">
@@ -63,7 +63,7 @@ function MessageBubble({ msg }: { msg: Message }) {
             )}
           </span>
         </div>
-        <p className="text-sm break-words whitespace-pre-wrap">
+        <p className="break-all text-sm whitespace-pre-wrap">
           {content ? (
             <>
               <span className="mr-1.5 text-muted-foreground" aria-hidden>📊</span>
@@ -96,14 +96,14 @@ function MessageBubble({ msg }: { msg: Message }) {
   // Poll vote: muted, smaller
   if (specialType === 'poll_vote') {
     return (
-      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-1.5">
+      <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-1.5">
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-medium text-muted-foreground">{msg.sender_name}</span>
           <span className="text-[10px] text-muted-foreground">
             {formatTimestamp(msg.timestamp_ms)}
           </span>
         </div>
-        <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">
+        <p className="break-all whitespace-pre-wrap text-xs text-muted-foreground">
           {content || '[Media]'}
         </p>
       </div>
@@ -113,7 +113,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   // Live location: muted with hint
   if (specialType === 'live_location') {
     return (
-      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-muted/30 px-3 py-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium text-muted-foreground">{msg.sender_name}</span>
           <span className="text-xs text-muted-foreground">
@@ -123,7 +123,7 @@ function MessageBubble({ msg }: { msg: Message }) {
             )}
           </span>
         </div>
-        <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+        <p className="break-all whitespace-pre-wrap text-sm text-muted-foreground">
           <span className="mr-1.5" aria-hidden>📍</span>
           {content || '[Live location]'}
         </p>
@@ -134,7 +134,7 @@ function MessageBubble({ msg }: { msg: Message }) {
   // Share: link icon, standard layout
   if (specialType === 'share') {
     return (
-      <div className="flex flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium">{msg.sender_name}</span>
           <span className="text-xs text-muted-foreground">
@@ -144,7 +144,7 @@ function MessageBubble({ msg }: { msg: Message }) {
             )}
           </span>
         </div>
-        <p className="text-sm break-words whitespace-pre-wrap">
+        <p className="break-all text-sm whitespace-pre-wrap">
           <span className="mr-1.5 text-muted-foreground" aria-hidden>🔗</span>
           {content ?? <span className="italic text-muted-foreground">[Link]</span>}
         </p>
@@ -170,7 +170,7 @@ function MessageBubble({ msg }: { msg: Message }) {
 
   // Generic / edited (when edited is primary and no other type): standard bubble with edited badge
   return (
-    <div className="flex flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
+    <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-muted/50 px-3 py-2">
       <div className="flex items-baseline gap-2">
         <span className="text-sm font-medium">{msg.sender_name}</span>
         <span className="text-xs text-muted-foreground">
@@ -180,7 +180,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           )}
         </span>
       </div>
-      <p className="text-sm break-words whitespace-pre-wrap">
+      <p className="break-all text-sm whitespace-pre-wrap">
         {content || (
           <span className="italic text-muted-foreground">[Media]</span>
         )}
@@ -210,17 +210,27 @@ function MessageBubble({ msg }: { msg: Message }) {
 interface MessageViewProps {
   threadId: string | null;
   dateFilter?: Date | null;
+  initialScrollToTimestampMs?: number | null;
 }
 
-export function MessageView({ threadId, dateFilter }: MessageViewProps) {
+export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }: MessageViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMoreNewer, setLoadingMoreNewer] = useState(false);
   const loadingMoreRef = useRef(false);
+  const loadingMoreNewerRef = useRef(false);
   const scrollAdjustRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
+  const initialScrollToTimestampRef = useRef<number | null>(null);
+
+  const getAnchorTimestamp = (): number =>
+    initialScrollToTimestampMs ??
+    dateFilter?.getTime() ??
+    Date.now();
 
   const loadMessages = useCallback(
     async (beforeTimestampMs?: number): Promise<Message[]> => {
@@ -261,56 +271,113 @@ export function MessageView({ threadId, dateFilter }: MessageViewProps) {
     [threadId]
   );
 
+  const loadMessagesAfter = useCallback(
+    async (afterTimestampMs: number): Promise<Message[]> => {
+      if (!threadId) return [];
+      const loadingForThreadId = threadId;
+      const batch = await window.electronAPI.getMessagesAfter(
+        threadId,
+        afterTimestampMs,
+        MESSAGE_LIMIT
+      );
+      if (activeThreadIdRef.current !== loadingForThreadId) return batch;
+      const batchIds = new Set(batch.map((m) => m.id));
+      setMessages((prev) => {
+        const filtered = prev.filter((m) => !batchIds.has(m.id));
+        return [...filtered, ...batch];
+      });
+      setHasMoreNewer(batch.length === MESSAGE_LIMIT);
+      return batch;
+    },
+    [threadId]
+  );
+
+  const loadMessagesAroundTimestamp = useCallback(
+    async (timestampMs: number) => {
+      if (!threadId) return;
+      const loadingForThreadId = threadId;
+      setLoading(true);
+      setHasMore(true);
+      setHasMoreNewer(true);
+      initialScrollToTimestampRef.current = timestampMs;
+      try {
+        const data = await window.electronAPI.getMessagesAroundTimestamp(
+          threadId,
+          timestampMs,
+          MESSAGE_LIMIT,
+          MESSAGE_LIMIT
+        );
+        if (activeThreadIdRef.current === loadingForThreadId) setMessages(data);
+      } finally {
+        if (activeThreadIdRef.current === loadingForThreadId) setLoading(false);
+      }
+    },
+    [threadId]
+  );
+
   useEffect(() => {
     if (!threadId) {
       activeThreadIdRef.current = null;
       loadingMoreRef.current = false;
+      loadingMoreNewerRef.current = false;
       setMessages([]);
       setHasMore(true);
+      setHasMoreNewer(false);
       return;
     }
 
     activeThreadIdRef.current = threadId;
     loadingMoreRef.current = false;
+    loadingMoreNewerRef.current = false;
     setMessages([]);
     scrollAdjustRef.current = null;
     didInitialScrollRef.current = false;
+    initialScrollToTimestampRef.current = null;
 
-    if (dateFilter) {
-      setLoading(true);
-      setHasMore(false);
-      const loadingForThreadId = threadId;
-      window.electronAPI
-        .getMessagesAroundDate(threadId, dateFilter.getTime(), 500)
-        .then((data) => {
-          if (activeThreadIdRef.current === loadingForThreadId) setMessages(data);
-        })
-        .finally(() => {
-          if (activeThreadIdRef.current === loadingForThreadId) setLoading(false);
-        });
-    } else {
-      setHasMore(true);
-      loadMessages();
-    }
-  }, [threadId, dateFilter?.getTime(), loadMessages]);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+
+    loadMessagesAroundTimestamp(getAnchorTimestamp());
+  }, [
+    threadId,
+    initialScrollToTimestampMs ?? null,
+    dateFilter?.getTime() ?? null,
+    loadMessagesAroundTimestamp,
+  ]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || loading || loadingMoreRef.current || !hasMore || messages.length === 0)
-      return;
-    const beforeTs = messages[0]?.timestamp_ms;
-    if (beforeTs == null) return;
+    if (!el || loading || messages.length === 0) return;
+
     const threshold = 100;
     const nearTop = el.scrollTop < threshold;
-    if (nearTop) {
-      loadingMoreRef.current = true;
-      setLoadingMore(true);
-      loadMessages(beforeTs).finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+
+    if (nearTop && !loadingMoreRef.current && hasMore) {
+      const beforeTs = messages[0]?.timestamp_ms;
+      if (beforeTs != null) {
+        loadingMoreRef.current = true;
+        setLoadingMore(true);
+        loadMessages(beforeTs).finally(() => {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        });
+      }
     }
-  }, [loading, hasMore, messages, loadMessages]);
+
+    if (nearBottom && hasMoreNewer && !loadingMoreNewerRef.current) {
+      const afterTs = messages[messages.length - 1]?.timestamp_ms;
+      if (afterTs != null) {
+        loadingMoreNewerRef.current = true;
+        setLoadingMoreNewer(true);
+        loadMessagesAfter(afterTs).finally(() => {
+          loadingMoreNewerRef.current = false;
+          setLoadingMoreNewer(false);
+        });
+      }
+    }
+  }, [loading, hasMore, hasMoreNewer, messages, loadMessages, loadMessagesAfter]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -322,7 +389,7 @@ export function MessageView({ threadId, dateFilter }: MessageViewProps) {
 
   const didInitialScrollRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!threadId || loading || messages.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
@@ -333,7 +400,24 @@ export function MessageView({ threadId, dateFilter }: MessageViewProps) {
       el.scrollTop = prevScrollTop + (el.scrollHeight - prevScrollHeight);
     } else if (!didInitialScrollRef.current) {
       didInitialScrollRef.current = true;
-      el.scrollTop = el.scrollHeight - el.clientHeight;
+      const targetTs = initialScrollToTimestampRef.current;
+      if (targetTs != null) {
+        const candidates = Array.from(
+          el.querySelectorAll('[data-message-timestamp]')
+        ) as HTMLElement[];
+        const targetEl =
+          candidates.find(
+            (n) => parseInt(n.dataset.messageTimestamp ?? '0', 10) === targetTs
+          ) ??
+          candidates.find(
+            (n) => parseInt(n.dataset.messageTimestamp ?? '0', 10) >= targetTs
+          ) ??
+          candidates[candidates.length - 1];
+        if (targetEl) targetEl.scrollIntoView({ block: 'center' });
+        initialScrollToTimestampRef.current = null;
+      } else {
+        el.scrollTop = el.scrollHeight - el.clientHeight;
+      }
     }
   }, [messages, loading, threadId]);
 
@@ -352,7 +436,7 @@ export function MessageView({ threadId, dateFilter }: MessageViewProps) {
   return (
     <div
       ref={scrollRef}
-      className="flex flex-1 flex-col overflow-y-auto p-4"
+      className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4"
     >
       {loading && messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -363,9 +447,19 @@ export function MessageView({ threadId, dateFilter }: MessageViewProps) {
               Loading older…
             </p>
           )}
-          <div className="flex flex-col gap-3">
+          {loadingMoreNewer && (
+            <p className="sticky bottom-0 z-10 bg-background py-2 text-xs text-muted-foreground">
+              Loading newer…
+            </p>
+          )}
+          <div className="flex min-w-0 flex-col gap-3">
             {messages.map((msg) => (
-              <div key={msg.id}>
+              <div
+                key={msg.id}
+                id={`msg-${msg.id}`}
+                data-message-timestamp={msg.timestamp_ms}
+                className="min-w-0"
+              >
                 <MessageBubble msg={msg} />
               </div>
             ))}

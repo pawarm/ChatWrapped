@@ -235,6 +235,8 @@ export async function importZip(
         }
       }
 
+      allMessages.sort((a, b) => (a.timestamp_ms ?? 0) - (b.timestamp_ms ?? 0));
+
       const stableThreadId = threadPath;
 
       onProgress?.({

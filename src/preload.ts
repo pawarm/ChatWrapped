@@ -9,6 +9,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db:getThreads', { search, sort }),
   getMessages: (threadId: string, limit: number, beforeTimestampMs?: number) =>
     ipcRenderer.invoke('db:getMessages', { threadId, limit, beforeTimestampMs }),
+  getMessagesAfter: (threadId: string, afterTimestampMs: number, limit?: number) =>
+    ipcRenderer.invoke('db:getMessagesAfter', { threadId, afterTimestampMs, limit }),
+  getMessagesAroundTimestamp: (
+    threadId: string,
+    timestampMs: number,
+    limitBefore?: number,
+    limitAfter?: number
+  ) =>
+    ipcRenderer.invoke('db:getMessagesAroundTimestamp', {
+      threadId,
+      timestampMs,
+      limitBefore,
+      limitAfter,
+    }),
   getMessagesAroundDate: (threadId: string, timestampMs: number, limit?: number) =>
     ipcRenderer.invoke('db:getMessagesAroundDate', { threadId, timestampMs, limit }),
   searchMessages: (query: string, limit?: number) =>

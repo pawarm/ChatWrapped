@@ -113,6 +113,121 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
   );
 
   ipcMain.handle(
+    'db:getMessagesAfter',
+    (
+      _: unknown,
+      payload: { threadId: string; afterTimestampMs: number; limit?: number }
+    ): Message[] => {
+      const db = getDbInstance();
+      const { threadId, afterTimestampMs, limit = 50 } = payload ?? {};
+
+      if (!threadId) return [];
+
+      const sql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type, special_type
+        FROM messages
+        WHERE thread_id = ? AND timestamp_ms > ?
+        ORDER BY timestamp_ms ASC
+        LIMIT ?`;
+      const messages = db
+        .prepare(sql)
+        .all(threadId, afterTimestampMs, limit) as Message[];
+
+      if (messages.length === 0) return [];
+
+      const messageIds = messages.map((m) => m.id);
+      const placeholders = messageIds.map(() => '?').join(',');
+      const reactionsRows = db
+        .prepare(
+          `SELECT message_id, actor, reaction FROM reactions WHERE message_id IN (${placeholders})`
+        )
+        .all(...messageIds) as { message_id: number; actor: string; reaction: string }[];
+
+      const reactionsByMessage = new Map<number, { actor: string; reaction: string }[]>();
+      for (const r of reactionsRows) {
+        const list = reactionsByMessage.get(r.message_id) ?? [];
+        list.push({
+          actor: fixMetaEncoding(r.actor),
+          reaction: fixMetaEncoding(r.reaction),
+        });
+        reactionsByMessage.set(r.message_id, list);
+      }
+
+      return messages.map((m) => ({
+        ...m,
+        reactions: reactionsByMessage.get(m.id),
+      }));
+    }
+  );
+
+  ipcMain.handle(
+    'db:getMessagesAroundTimestamp',
+    (
+      _: unknown,
+      payload: {
+        threadId: string;
+        timestampMs: number;
+        limitBefore?: number;
+        limitAfter?: number;
+      }
+    ): Message[] => {
+      const db = getDbInstance();
+      const {
+        threadId,
+        timestampMs,
+        limitBefore = 50,
+        limitAfter = 50,
+      } = payload ?? {};
+
+      if (!threadId) return [];
+
+      const beforeSql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type, special_type
+        FROM messages
+        WHERE thread_id = ? AND timestamp_ms < ?
+        ORDER BY timestamp_ms DESC
+        LIMIT ?`;
+      const beforeRows = db
+        .prepare(beforeSql)
+        .all(threadId, timestampMs, limitBefore) as Message[];
+      const before = [...beforeRows].reverse();
+
+      const afterSql = `SELECT id, thread_id, sender_name, timestamp_ms, content, content_type, special_type
+        FROM messages
+        WHERE thread_id = ? AND timestamp_ms >= ?
+        ORDER BY timestamp_ms ASC
+        LIMIT ?`;
+      const after = db
+        .prepare(afterSql)
+        .all(threadId, timestampMs, limitAfter) as Message[];
+
+      const messages = [...before, ...after];
+      if (messages.length === 0) return [];
+
+      const messageIds = messages.map((m) => m.id);
+      const placeholders = messageIds.map(() => '?').join(',');
+      const reactionsRows = db
+        .prepare(
+          `SELECT message_id, actor, reaction FROM reactions WHERE message_id IN (${placeholders})`
+        )
+        .all(...messageIds) as { message_id: number; actor: string; reaction: string }[];
+
+      const reactionsByMessage = new Map<number, { actor: string; reaction: string }[]>();
+      for (const r of reactionsRows) {
+        const list = reactionsByMessage.get(r.message_id) ?? [];
+        list.push({
+          actor: fixMetaEncoding(r.actor),
+          reaction: fixMetaEncoding(r.reaction),
+        });
+        reactionsByMessage.set(r.message_id, list);
+      }
+
+      return messages.map((m) => ({
+        ...m,
+        reactions: reactionsByMessage.get(m.id),
+      }));
+    }
+  );
+
+  ipcMain.handle(
     'db:getMessagesAroundDate',
     (
       _: unknown,

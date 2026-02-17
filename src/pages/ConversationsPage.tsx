@@ -1,4 +1,10 @@
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MessageView } from '@/components/conversation/MessageView';
@@ -15,8 +21,29 @@ function formatSearchTimestamp(ms: number): string {
   });
 }
 
+const MSG_HASH_REGEX = /^#msg-(\d+)$/;
+
+function getMessageTimestampFromUrl(
+  hash: string,
+  searchParams: URLSearchParams
+): number | null {
+  const hashMatch = hash.match(MSG_HASH_REGEX);
+  if (hashMatch) {
+    const ts = parseInt(hashMatch[1], 10);
+    return Number.isNaN(ts) ? null : ts;
+  }
+  const q = searchParams.get('message');
+  if (q) {
+    const ts = parseInt(q, 10);
+    return Number.isNaN(ts) ? null : ts;
+  }
+  return null;
+}
+
 export function ConversationsPage() {
   const { threadId } = useParams<{ threadId: string }>();
+  const { hash } = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,9 +83,14 @@ export function ConversationsPage() {
   }, [debouncedMessageSearch]);
 
   const handleSelectThread = useCallback(
-    (id: string) => {
+    (id: string, messageTimestampMs?: number) => {
       setDateFilter(null);
-      navigate(`/conversations/${encodeURIComponent(id)}`);
+      const path = `/conversations/${encodeURIComponent(id)}`;
+      if (messageTimestampMs != null) {
+        navigate(`${path}#msg-${messageTimestampMs}`);
+      } else {
+        navigate(path);
+      }
     },
     [navigate]
   );
@@ -110,7 +142,9 @@ export function ConversationsPage() {
                   <button
                     key={r.id}
                     type="button"
-                    onClick={() => handleSelectThread(r.thread_id)}
+                    onClick={() =>
+                      handleSelectThread(r.thread_id, r.timestamp_ms)
+                    }
                     className="rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
                   >
                     <div className="font-medium text-primary">
@@ -185,13 +219,17 @@ export function ConversationsPage() {
                 onChange={(e) => {
                   const val = e.target.value;
                   setDateFilter(val ? new Date(val + 'T12:00:00') : null);
+                  if (val) setSearchParams({});
                 }}
                 className="rounded border border-input bg-background px-2 py-1 text-xs"
               />
               {dateFilter && (
                 <button
                   type="button"
-                  onClick={() => setDateFilter(null)}
+                  onClick={() => {
+                    setDateFilter(null);
+                    setSearchParams({});
+                  }}
                   className="text-xs text-muted-foreground underline hover:text-foreground"
                 >
                   Clear
@@ -203,6 +241,9 @@ export function ConversationsPage() {
         <MessageView
           threadId={threadId ?? null}
           dateFilter={dateFilter}
+          initialScrollToTimestampMs={
+            threadId ? getMessageTimestampFromUrl(hash, searchParams) : null
+          }
         />
       </main>
     </div>
