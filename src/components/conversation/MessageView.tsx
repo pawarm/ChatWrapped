@@ -1,6 +1,57 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { Message } from '@/types/conversation';
+import type { MediaItem, Message } from '@/types/conversation';
+
+function MediaSection({ items }: { items: MediaItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {items.map((item) => {
+        const url = window.electronAPI.getMediaUrl(item.relative_path);
+        if (item.media_type === 'photo' || item.media_type === 'gif' || item.media_type === 'sticker') {
+          return (
+            <img
+              key={item.id}
+              src={url}
+              alt=""
+              className="max-h-64 max-w-full rounded-lg object-contain"
+            />
+          );
+        }
+        if (item.media_type === 'video') {
+          return (
+            <video
+              key={item.id}
+              src={url}
+              controls
+              className="max-h-64 max-w-full rounded-lg"
+            />
+          );
+        }
+        if (item.media_type === 'audio') {
+          return (
+            <audio key={item.id} src={url} controls className="max-w-full" />
+          );
+        }
+        if (item.media_type === 'file') {
+          return (
+            <a
+              key={item.id}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted/50"
+            >
+              <span aria-hidden>📎</span>
+              {item.relative_path}
+            </a>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
 
 function MessageListSkeleton() {
   const widths = ['w-48', 'w-64', 'w-40', 'w-56', 'w-32', 'w-72', 'w-44'];
@@ -95,10 +146,11 @@ function MessageBubble({ msg }: { msg: Message }) {
               <span className="mr-1.5 text-muted-foreground" aria-hidden>📊</span>
               {content}
             </>
-          ) : (
+          ) : !msg.media?.length ? (
             <span className="italic text-muted-foreground">[Media]</span>
-          )}
+          ) : null}
         </p>
+        {msg.media && msg.media.length > 0 && <MediaSection items={msg.media} />}
         {msg.reactions && msg.reactions.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
             {Object.entries(
@@ -130,8 +182,9 @@ function MessageBubble({ msg }: { msg: Message }) {
           </span>
         </div>
         <p className="break-all whitespace-pre-wrap text-xs text-muted-foreground">
-          {content || '[Media]'}
+          {content || (!msg.media?.length ? '[Media]' : null)}
         </p>
+        {msg.media && msg.media.length > 0 && <MediaSection items={msg.media} />}
       </div>
     );
   }
@@ -153,6 +206,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           <span className="mr-1.5" aria-hidden>📍</span>
           {content || '[Live location]'}
         </p>
+        {msg.media && msg.media.length > 0 && <MediaSection items={msg.media} />}
       </div>
     );
   }
@@ -172,8 +226,9 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
         <p className="break-all text-sm whitespace-pre-wrap">
           <span className="mr-1.5 text-muted-foreground" aria-hidden>🔗</span>
-          {content ?? <span className="italic text-muted-foreground">[Link]</span>}
+          {content ?? (!msg.media?.length ? <span className="italic text-muted-foreground">[Link]</span> : null)}
         </p>
+        {msg.media && msg.media.length > 0 && <MediaSection items={msg.media} />}
         {msg.reactions && msg.reactions.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
             {Object.entries(
@@ -206,11 +261,13 @@ function MessageBubble({ msg }: { msg: Message }) {
           )}
         </span>
       </div>
-      <p className="break-all text-sm whitespace-pre-wrap">
-        {content || (
-          <span className="italic text-muted-foreground">[Media]</span>
-        )}
-      </p>
+      {content ? (
+        <p className="break-all text-sm whitespace-pre-wrap">{content}</p>
+      ) : null}
+      {msg.media && msg.media.length > 0 && <MediaSection items={msg.media} />}
+      {!content && !msg.media?.length && (
+        <p className="text-sm italic text-muted-foreground">[Media]</p>
+      )}
       {msg.reactions && msg.reactions.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
           {Object.entries(

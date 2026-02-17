@@ -44,9 +44,20 @@ function initSchema(database: Database.Database): void {
       FOREIGN KEY (message_id) REFERENCES messages(id)
     );
 
+    CREATE TABLE IF NOT EXISTS media (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL,
+      media_type TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      mime_type TEXT,
+      sort_order INTEGER DEFAULT 0,
+      FOREIGN KEY (message_id) REFERENCES messages(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp_ms);
     CREATE INDEX IF NOT EXISTS idx_reactions_message_id ON reactions(message_id);
+    CREATE INDEX IF NOT EXISTS idx_media_message_id ON media(message_id);
   `);
   migrateSchema(database);
   database.exec(`

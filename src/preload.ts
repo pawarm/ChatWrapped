@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
+function getMediaUrl(filename: string): string {
+  return `chatwrapped-media://media/${encodeURIComponent(filename)}`;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
+  getMediaUrl,
   importZip: (file: File) => {
     const filePath = webUtils.getPathForFile(file);
     return ipcRenderer.invoke('import:start', filePath);

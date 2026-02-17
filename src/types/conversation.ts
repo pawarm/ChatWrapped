@@ -7,6 +7,13 @@ export interface Thread {
   last_message_at?: number;
 }
 
+export interface MediaItem {
+  id: number;
+  media_type: string;
+  relative_path: string;
+  mime_type?: string | null;
+}
+
 export interface Message {
   id: number;
   thread_id: string;
@@ -16,6 +23,7 @@ export interface Message {
   content_type: string;
   special_type?: string | null;
   reactions?: { actor: string; reaction: string }[];
+  media?: MediaItem[];
 }
 
 export interface SearchResult {

@@ -29,6 +29,8 @@ const config: ForgeConfig = {
     new AutoUnpackNativesPlugin({}),
     new WebpackPlugin({
       mainConfig,
+      devContentSecurityPolicy:
+        "default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' data:; img-src 'self' 'unsafe-inline' data: chatwrapped-media:; media-src 'self' 'unsafe-inline' data: chatwrapped-media:",
       renderer: {
         config: rendererConfig,
         entryPoints: [

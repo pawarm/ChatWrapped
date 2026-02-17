@@ -1,7 +1,45 @@
 import { ipcMain } from 'electron';
 import type Database from 'better-sqlite3';
 import { fixMetaEncoding } from '../lib/utils';
-import type { Message, SearchResult, StatsSummary, Thread } from '../types/conversation';
+import { clearMediaStorage } from './mediaStorage';
+import type { MediaItem, Message, SearchResult, StatsSummary, Thread } from '../types/conversation';
+
+function attachMediaToMessages(
+  db: Database.Database,
+  messages: (Message & { reactions?: { actor: string; reaction: string }[] })[]
+): (Message & { reactions?: { actor: string; reaction: string }[] })[] {
+  if (messages.length === 0) return messages;
+  const messageIds = messages.map((m) => m.id);
+  const placeholders = messageIds.map(() => '?').join(',');
+  const mediaRows = db
+    .prepare(
+      `SELECT id, message_id, media_type, relative_path, mime_type, sort_order
+       FROM media WHERE message_id IN (${placeholders}) ORDER BY message_id, sort_order`
+    )
+    .all(...messageIds) as {
+    id: number;
+    message_id: number;
+    media_type: string;
+    relative_path: string;
+    mime_type: string | null;
+    sort_order: number;
+  }[];
+  const mediaByMessage = new Map<number, MediaItem[]>();
+  for (const row of mediaRows) {
+    const list = mediaByMessage.get(row.message_id) ?? [];
+    list.push({
+      id: row.id,
+      media_type: row.media_type,
+      relative_path: row.relative_path,
+      mime_type: row.mime_type,
+    });
+    mediaByMessage.set(row.message_id, list);
+  }
+  return messages.map((m) => ({
+    ...m,
+    media: mediaByMessage.get(m.id),
+  }));
+}
 
 export function registerDbHandlers(getDbInstance: () => Database.Database): void {
   ipcMain.handle('db:getStats', (): StatsSummary => {
@@ -36,7 +74,8 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
 
   ipcMain.handle('db:clearAllData', (): void => {
     const db = getDbInstance();
-    db.exec('DELETE FROM reactions; DELETE FROM messages; DELETE FROM threads;');
+    db.exec('DELETE FROM media; DELETE FROM reactions; DELETE FROM messages; DELETE FROM threads;');
+    clearMediaStorage();
   });
 
   ipcMain.handle(
@@ -140,10 +179,11 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
         reactionsByMessage.set(r.message_id, list);
       }
 
-      return messages.map((m) => ({
+      const withReactions = messages.map((m) => ({
         ...m,
         reactions: reactionsByMessage.get(m.id),
       }));
+      return attachMediaToMessages(db, withReactions);
     }
   );
 
@@ -187,10 +227,11 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
         reactionsByMessage.set(r.message_id, list);
       }
 
-      return messages.map((m) => ({
+      const withReactions = messages.map((m) => ({
         ...m,
         reactions: reactionsByMessage.get(m.id),
       }));
+      return attachMediaToMessages(db, withReactions);
     }
   );
 
@@ -255,10 +296,11 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
         reactionsByMessage.set(r.message_id, list);
       }
 
-      return messages.map((m) => ({
+      const withReactions = messages.map((m) => ({
         ...m,
         reactions: reactionsByMessage.get(m.id),
       }));
+      return attachMediaToMessages(db, withReactions);
     }
   );
 
@@ -314,10 +356,11 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
         reactionsByMessage.set(r.message_id, list);
       }
 
-      return messages.map((m) => ({
+      const withReactions = messages.map((m) => ({
         ...m,
         reactions: reactionsByMessage.get(m.id),
       }));
+      return attachMediaToMessages(db, withReactions);
     }
   );
 

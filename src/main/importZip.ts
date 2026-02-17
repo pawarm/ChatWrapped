@@ -4,7 +4,29 @@ import path from 'path';
 import type Database from 'better-sqlite3';
 import { classifySpecialMessage } from '../lib/specialMessages';
 import { fixMetaEncoding } from '../lib/utils';
+import { ensureMediaDir, getMediaDir } from './mediaStorage';
 import type { ImportProgress, ImportSummary } from '../types/import';
+
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+};
+
+type MediaType = 'photo' | 'video' | 'gif' | 'audio' | 'file' | 'sticker';
+
+interface MediaItem {
+  uri: string;
+}
 
 const INBOX_MESSAGE_PATTERN =
   /messages[/\\]inbox[/\\][^/\\]+[/\\]message_(\d+)\.json$/i;
@@ -20,6 +42,12 @@ interface MetaMessage {
   type?: string;
   share?: unknown;
   reactions?: { reaction?: string; actor?: string }[];
+  photos?: MediaItem[];
+  videos?: MediaItem[];
+  gifs?: MediaItem[];
+  audio_files?: MediaItem[];
+  files?: MediaItem[];
+  sticker?: MediaItem | { uri?: string };
 }
 
 interface MetaMessageFile {
@@ -107,6 +135,63 @@ function filterEditedDuplicates(messages: MetaMessage[]): MetaMessage[] {
   return byTs.filter((_, i) => !toRemove.has(i));
 }
 
+function getMimeTypeFromUri(uri: string): string | null {
+  const ext = path.extname(uri).slice(1).toLowerCase();
+  return MIME_BY_EXT[ext] ?? null;
+}
+
+function collectMediaItems(m: MetaMessage): { uri: string; type: MediaType }[] {
+  const items: { uri: string; type: MediaType }[] = [];
+  for (const p of m.photos ?? []) {
+    if (p?.uri) items.push({ uri: p.uri, type: 'photo' });
+  }
+  for (const v of m.videos ?? []) {
+    if (v?.uri) items.push({ uri: v.uri, type: 'video' });
+  }
+  for (const g of m.gifs ?? []) {
+    if (g?.uri) items.push({ uri: g.uri, type: 'gif' });
+  }
+  for (const a of m.audio_files ?? []) {
+    if (a?.uri) items.push({ uri: a.uri, type: 'audio' });
+  }
+  for (const f of m.files ?? []) {
+    if (f?.uri) items.push({ uri: f.uri, type: 'file' });
+  }
+  const sticker = m.sticker;
+  if (sticker && typeof sticker === 'object' && 'uri' in sticker && sticker.uri) {
+    items.push({ uri: sticker.uri, type: 'sticker' });
+  }
+  return items;
+}
+
+function extractMediaFromZip(
+  zip: AdmZip,
+  messageId: number,
+  items: { uri: string; type: MediaType }[],
+  mediaDir: string,
+  insertMedia: { run: (...args: unknown[]) => void }
+): void {
+  for (let i = 0; i < items.length; i++) {
+    const { uri, type } = items[i];
+    const normalizedUri = uri.replace(/\\/g, '/');
+    const entry = zip.getEntry(normalizedUri);
+    if (!entry || entry.isDirectory) continue;
+    try {
+      const buffer = zip.readFile(entry);
+      if (!buffer || buffer.length === 0) continue;
+      const ext = path.extname(normalizedUri) || '.bin';
+      const safeExt = ext.replace(/[^a-zA-Z0-9.]/g, '_').slice(0, 16) || '.bin';
+      const filename = `${messageId}_${i}_${type}${safeExt}`;
+      const outPath = path.join(mediaDir, filename);
+      fs.writeFileSync(outPath, buffer);
+      const mimeType = getMimeTypeFromUri(uri);
+      insertMedia.run(messageId, type, filename, mimeType, i);
+    } catch {
+      // Skip corrupt/missing media
+    }
+  }
+}
+
 function groupEntriesByThread(
   entries: AdmZip.IZipEntry[]
 ): Map<string, EntryWithSort[]> {
@@ -179,9 +264,15 @@ export async function importZip(
   let messagesImported = 0;
   let reactionsImported = 0;
 
+  ensureMediaDir();
+  const mediaDir = getMediaDir();
+
   const insertThread = database.prepare(`
     INSERT OR REPLACE INTO threads (id, title, thread_type, participants_json, created_at)
     VALUES (?, ?, ?, ?, strftime('%s', 'now'))
+  `);
+  const deleteMediaForThread = database.prepare(`
+    DELETE FROM media WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
   `);
   const deleteMessages = database.prepare('DELETE FROM messages WHERE thread_id = ?');
   const deleteReactionsForThread = database.prepare(`
@@ -194,6 +285,10 @@ export async function importZip(
   const insertReaction = database.prepare(`
     INSERT INTO reactions (message_id, actor, reaction)
     VALUES (?, ?, ?)
+  `);
+  const insertMedia = database.prepare(`
+    INSERT INTO media (message_id, media_type, relative_path, mime_type, sort_order)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   const transaction = database.transaction(() => {
@@ -248,6 +343,7 @@ export async function importZip(
 
       insertThread.run(stableThreadId, title, threadType, participantsJson);
 
+      deleteMediaForThread.run(stableThreadId);
       deleteReactionsForThread.run(stableThreadId);
       deleteMessages.run(stableThreadId);
 
@@ -274,6 +370,9 @@ export async function importZip(
           id: number;
         };
         const messageId = row.id;
+
+        const mediaItems = collectMediaItems(m);
+        extractMediaFromZip(zip, messageId, mediaItems, mediaDir, insertMedia);
 
         for (const r of m.reactions ?? []) {
           insertReaction.run(

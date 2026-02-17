@@ -4,6 +4,7 @@ import type { Message, SearchResult, StatsSummary, Thread } from './types/conver
 declare global {
   interface Window {
     electronAPI: {
+      getMediaUrl: (filename: string) => string;
       importZip: (file: File) => Promise<ImportSummary>;
       getStats: () => Promise<StatsSummary>;
       clearAllData: () => Promise<void>;
