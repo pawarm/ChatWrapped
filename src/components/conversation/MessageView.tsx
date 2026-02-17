@@ -1,5 +1,31 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { Message } from '@/types/conversation';
+
+function MessageListSkeleton() {
+  const widths = ['w-48', 'w-64', 'w-40', 'w-56', 'w-32', 'w-72', 'w-44'];
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      {widths.map((w, i) => (
+        <div
+          key={i}
+          className={
+            i % 2 === 0
+              ? 'flex justify-start'
+              : 'flex justify-end'
+          }
+        >
+          <div
+            className={`min-w-0 max-w-[80%] rounded-lg bg-muted/50 px-3 py-2`}
+          >
+            <Skeleton className={`h-3 ${w} mb-1.5`} />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const MESSAGE_LIMIT = 50;
 
@@ -439,7 +465,7 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
       className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4"
     >
       {loading && messages.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <MessageListSkeleton />
       ) : (
         <>
           {loadingMore && (

@@ -1,9 +1,44 @@
 import { ipcMain } from 'electron';
 import type Database from 'better-sqlite3';
 import { fixMetaEncoding } from '../lib/utils';
-import type { Message, SearchResult, Thread } from '../types/conversation';
+import type { Message, SearchResult, StatsSummary, Thread } from '../types/conversation';
 
 export function registerDbHandlers(getDbInstance: () => Database.Database): void {
+  ipcMain.handle('db:getStats', (): StatsSummary => {
+    const db = getDbInstance();
+    const row = db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM threads) as thread_count,
+          (SELECT COUNT(*) FROM messages) as message_count,
+          (SELECT COUNT(*) FROM reactions) as reaction_count,
+          (SELECT COALESCE(SUM(1 + LENGTH(COALESCE(content,'')) - LENGTH(REPLACE(COALESCE(content,''), ' ', ''))), 0) FROM messages WHERE content IS NOT NULL AND content != '') as word_count,
+          (SELECT MIN(timestamp_ms) FROM messages) as first_message_at,
+          (SELECT MAX(timestamp_ms) FROM messages) as last_message_at`
+      )
+      .get() as {
+      thread_count: number;
+      message_count: number;
+      reaction_count: number;
+      word_count: number;
+      first_message_at: number | null;
+      last_message_at: number | null;
+    };
+    return {
+      threadCount: row.thread_count ?? 0,
+      messageCount: row.message_count ?? 0,
+      reactionCount: row.reaction_count ?? 0,
+      wordCount: row.word_count ?? 0,
+      firstMessageAt: row.first_message_at ?? null,
+      lastMessageAt: row.last_message_at ?? null,
+    };
+  });
+
+  ipcMain.handle('db:clearAllData', (): void => {
+    const db = getDbInstance();
+    db.exec('DELETE FROM reactions; DELETE FROM messages; DELETE FROM threads;');
+  });
+
   ipcMain.handle(
     'db:getThreads',
     (

@@ -27,3 +27,12 @@ export interface SearchResult {
   content: string | null;
   snippet?: string;
 }
+
+export interface StatsSummary {
+  threadCount: number;
+  messageCount: number;
+  reactionCount: number;
+  wordCount: number;
+  firstMessageAt: number | null;
+  lastMessageAt: number | null;
+}

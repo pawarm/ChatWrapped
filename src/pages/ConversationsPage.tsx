@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { MessageView } from '@/components/conversation/MessageView';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { SearchResult, Thread } from '@/types/conversation';
@@ -22,6 +23,21 @@ function formatSearchTimestamp(ms: number): string {
 }
 
 const MSG_HASH_REGEX = /^#msg-(\d+)$/;
+
+function ThreadListSkeleton() {
+  return (
+    <ul className="flex flex-col">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <li key={i} className="border-b border-border px-4 py-3">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-[180px]" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function getMessageTimestampFromUrl(
   hash: string,
@@ -96,8 +112,8 @@ export function ConversationsPage() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] min-h-0 w-full gap-0">
-      <aside className="flex w-[280px] shrink-0 flex-col border-r border-border">
+    <div className="flex min-h-0 min-w-0 flex-1 gap-0">
+      <aside className="flex min-h-0 w-[280px] shrink-0 flex-col border-r border-border">
         <div className="flex flex-col gap-2 border-b border-border p-3">
           <input
             type="search"
@@ -161,7 +177,7 @@ export function ConversationsPage() {
               )}
             </div>
           ) : loading ? (
-            <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+            <ThreadListSkeleton />
           ) : threads.length === 0 ? (
             <div className="flex flex-col gap-3 p-4">
               <p className="text-sm text-muted-foreground">
@@ -195,7 +211,7 @@ export function ConversationsPage() {
           )}
         </div>
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {threadId && (
           <div className="flex items-center gap-3 border-b border-border px-4 py-2">
             <h3 className="min-w-0 flex-1 truncate text-sm font-medium">

@@ -1,13 +1,16 @@
-import { useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import type { StatsSummary } from '@/types/conversation';
 
 const META_ACCOUNTS_URL = 'https://accountscenter.facebook.com/';
 
 export function ImportPage() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [stats, setStats] = useState<StatsSummary | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [droppedFileName, setDroppedFileName] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     threadsImported: number;
@@ -103,7 +106,40 @@ export function ImportPage() {
     [handleFile, isImporting]
   );
 
+  useEffect(() => {
+    window.electronAPI.getStats().then(setStats);
+  }, [result]);
+
+  const handleClearData = useCallback(async () => {
+    if (
+      !window.confirm(
+        'This will permanently delete all imported conversations, messages, and reactions. This cannot be undone. Continue?'
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setIsClearing(true);
+    try {
+      await window.electronAPI.clearAllData();
+      setStats({
+        threadCount: 0,
+        messageCount: 0,
+        reactionCount: 0,
+        wordCount: 0,
+        firstMessageAt: null,
+        lastMessageAt: null,
+      });
+      setResult(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear data.');
+    } finally {
+      setIsClearing(false);
+    }
+  }, []);
+
   const isDisabled = isImporting;
+  const hasData = stats != null && stats.messageCount > 0;
 
   const progressLabel =
     progress?.phase === 'extracting'
@@ -225,6 +261,24 @@ export function ImportPage() {
             {result.reactionsImported > 0 &&
               `, ${result.reactionsImported} reactions`}
           </p>
+        )}
+
+        {hasData && (
+          <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
+            <h3 className="text-sm font-medium">Clear imported data</h3>
+            <p className="text-sm text-muted-foreground">
+              Remove all conversations, messages, and reactions from the database.
+              You can import again afterwards.
+            </p>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleClearData}
+              disabled={isClearing || isImporting}
+            >
+              {isClearing ? 'Clearing…' : 'Clear all data'}
+            </Button>
+          </div>
         )}
       </div>
     </div>

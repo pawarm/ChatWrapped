@@ -1,10 +1,12 @@
 import type { ImportProgress, ImportResult, ImportSummary } from './types/import';
-import type { Message, SearchResult, Thread } from './types/conversation';
+import type { Message, SearchResult, StatsSummary, Thread } from './types/conversation';
 
 declare global {
   interface Window {
     electronAPI: {
       importZip: (file: File) => Promise<ImportSummary>;
+      getStats: () => Promise<StatsSummary>;
+      clearAllData: () => Promise<void>;
       getThreads: (search?: string, sort?: 'recent' | 'name') => Promise<Thread[]>;
       getMessages: (threadId: string, limit: number, beforeTimestampMs?: number) => Promise<Message[]>;
       getMessagesAfter: (threadId: string, afterTimestampMs: number, limit?: number) => Promise<Message[]>;
@@ -22,6 +24,6 @@ declare global {
 }
 
 export type { ImportProgress, ImportResult, ImportSummary };
-export type { Message, SearchResult, Thread };
+export type { Message, SearchResult, StatsSummary, Thread };
 
 export {};
