@@ -23,7 +23,7 @@ A simple guide to getting started with ChatWrapped: what it does, what you need,
 ## What You Need
 
 1. **A Meta (Facebook) account** with Messenger data
-2. **ChatWrapped** — the desktop app ([download or build from source](../../README.md#install--run))
+2. **ChatWrapped** — the desktop app ([download from GitHub Releases](https://github.com/pawarm/ChatWrapped/releases) or [build from source](https://github.com/pawarm/ChatWrapped#build-from-source))
 3. **A Messenger data export** — a ZIP file from Meta (see below)
 
 ---

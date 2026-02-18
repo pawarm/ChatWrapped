@@ -17,6 +17,18 @@ const config: ForgeConfig = {
     asar: true,
     executableName: 'chatwrapped',
     icon: path.join(__dirname, 'assets', 'app-logo'),
+    // macOS signing (only when env vars set)
+    osxSign: process.env.APPLE_ID ? {} : undefined,
+    osxNotarize:
+      process.env.APPLE_ID &&
+      process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+      process.env.APPLE_TEAM_ID
+        ? {
+            appleId: process.env.APPLE_ID,
+            appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+            teamId: process.env.APPLE_TEAM_ID,
+          }
+        : undefined,
   },
   rebuildConfig: {},
   makers: [

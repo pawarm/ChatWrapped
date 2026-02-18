@@ -26,12 +26,17 @@ A local-first desktop app to import, browse, and explore your Meta/Facebook Mess
 
 ## Getting Started
 
-### Prerequisites
+### Download
 
-- Node.js v20 or later (LTS recommended)
-- npm
+Pre-built releases for Windows, macOS (Intel and Apple Silicon), and Linux are available on [GitHub Releases](https://github.com/pawarm/ChatWrapped/releases).
 
-### Install & Run
+- **macOS**: Download the `.zip` for your chip (arm64 for Apple Silicon, x64 for Intel), unzip, and move ChatWrapped to Applications.
+- **Windows**: Download the `.exe` installer and run it.
+- **Linux**: Download the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) package and install with your package manager.
+
+### Build from Source
+
+**Prerequisites:** Node.js v20 or later (LTS recommended), npm
 
 ```bash
 git clone https://github.com/pawarm/ChatWrapped.git

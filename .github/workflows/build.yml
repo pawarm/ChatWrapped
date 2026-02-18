@@ -30,6 +30,10 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
       - name: Build
         run: npm run make
         env:
@@ -38,5 +42,5 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.os }}
+          name: build-${{ matrix.os }}-${{ steps.version.outputs.version }}
           path: out/
