@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }),
   getMessagesAroundDate: (threadId: string, timestampMs: number, limit?: number) =>
     ipcRenderer.invoke('db:getMessagesAroundDate', { threadId, timestampMs, limit }),
+  getMessageHistogram: (threadId: string) =>
+    ipcRenderer.invoke('db:getMessageHistogram', { threadId }),
   searchMessages: (query: string, limit?: number) =>
     ipcRenderer.invoke('db:searchMessages', { query, limit }),
   getStats: () => ipcRenderer.invoke('db:getStats'),

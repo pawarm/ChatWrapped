@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+
+const VISIBLE_RANGE_THROTTLE_MS = 100;
 import { Skeleton } from '@/components/ui/skeleton';
 import type { MediaItem, Message } from '@/types/conversation';
 
@@ -294,9 +296,10 @@ interface MessageViewProps {
   threadId: string | null;
   dateFilter?: Date | null;
   initialScrollToTimestampMs?: number | null;
+  onVisibleTimeRangeChange?: (range: { startMs: number; endMs: number } | null) => void;
 }
 
-export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }: MessageViewProps) {
+export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs, onVisibleTimeRangeChange }: MessageViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -309,11 +312,50 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
   const scrollAdjustRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
   const initialScrollToTimestampRef = useRef<number | null>(null);
+  const onVisibleTimeRangeChangeRef = useRef(onVisibleTimeRangeChange);
+  const visibleRangeThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  onVisibleTimeRangeChangeRef.current = onVisibleTimeRangeChange;
 
   const getAnchorTimestamp = (): number =>
     initialScrollToTimestampMs ??
     dateFilter?.getTime() ??
     Date.now();
+
+  const computeVisibleTimeRange = useCallback(() => {
+    const el = scrollRef.current;
+    const callback = onVisibleTimeRangeChangeRef.current;
+    if (!el || !callback) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const candidates = el.querySelectorAll('[data-message-timestamp]');
+    const timestamps: number[] = [];
+    for (const node of candidates) {
+      const el = node as HTMLElement;
+      const childRect = el.getBoundingClientRect();
+      const intersects =
+        childRect.top < rect.bottom && childRect.bottom > rect.top;
+      if (intersects) {
+        const ts = parseInt(el.dataset.messageTimestamp ?? '0', 10);
+        if (!Number.isNaN(ts)) timestamps.push(ts);
+      }
+    }
+    if (timestamps.length === 0) {
+      callback(null);
+      return;
+    }
+    callback({
+      startMs: Math.min(...timestamps),
+      endMs: Math.max(...timestamps),
+    });
+  }, []);
+
+  const scheduleVisibleRangeUpdate = useCallback(() => {
+    if (visibleRangeThrottleRef.current) return;
+    visibleRangeThrottleRef.current = setTimeout(() => {
+      visibleRangeThrottleRef.current = null;
+      computeVisibleTimeRange();
+    }, VISIBLE_RANGE_THROTTLE_MS);
+  }, [computeVisibleTimeRange]);
 
   const loadMessages = useCallback(
     async (beforeTimestampMs?: number): Promise<Message[]> => {
@@ -432,6 +474,8 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
     const el = scrollRef.current;
     if (!el || loading || messages.length === 0) return;
 
+    scheduleVisibleRangeUpdate();
+
     const threshold = 100;
     const nearTop = el.scrollTop < threshold;
     const nearBottom =
@@ -460,7 +504,7 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
         });
       }
     }
-  }, [loading, hasMore, hasMoreNewer, messages, loadMessages, loadMessagesAfter]);
+  }, [loading, hasMore, hasMoreNewer, messages, loadMessages, loadMessagesAfter, scheduleVisibleRangeUpdate]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -473,7 +517,10 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
   const didInitialScrollRef = useRef(false);
 
   useLayoutEffect(() => {
-    if (!threadId || loading || messages.length === 0) return;
+    if (!threadId || loading || messages.length === 0) {
+      onVisibleTimeRangeChangeRef.current?.(null);
+      return;
+    }
     const el = scrollRef.current;
     if (!el) return;
 
@@ -502,7 +549,8 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs }
         el.scrollTop = el.scrollHeight - el.clientHeight;
       }
     }
-  }, [messages, loading, threadId]);
+    computeVisibleTimeRange();
+  }, [messages, loading, threadId, computeVisibleTimeRange]);
 
   useEffect(() => {
     if (!threadId) didInitialScrollRef.current = false;

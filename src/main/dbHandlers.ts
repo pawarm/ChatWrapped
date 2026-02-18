@@ -364,6 +364,61 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
     }
   );
 
+  const HISTOGRAM_BINS = 60;
+
+  ipcMain.handle(
+    'db:getMessageHistogram',
+    (
+      _: unknown,
+      payload: { threadId: string }
+    ): {
+      minTimestampMs: number;
+      maxTimestampMs: number;
+      buckets: { binIndex: number; count: number }[];
+    } | null => {
+      const db = getDbInstance();
+      const { threadId } = payload ?? {};
+      if (!threadId) return null;
+
+      const rangeRow = db
+        .prepare(
+          `SELECT MIN(timestamp_ms) as min_ts, MAX(timestamp_ms) as max_ts
+           FROM messages WHERE thread_id = ?`
+        )
+        .get(threadId) as { min_ts: number | null; max_ts: number | null };
+
+      const minTs = rangeRow?.min_ts;
+      const maxTs = rangeRow?.max_ts;
+      if (minTs == null || maxTs == null) return null;
+
+      const span = maxTs - minTs;
+      const divisor = span > 0 ? span : 1;
+
+      const bucketRows = db
+        .prepare(
+          `SELECT CAST((timestamp_ms - ?) * ? / ? AS INTEGER) as bin_index, COUNT(*) as count
+           FROM messages
+           WHERE thread_id = ?
+           GROUP BY bin_index`
+        )
+        .all(minTs, HISTOGRAM_BINS - 1, divisor, threadId) as { bin_index: number; count: number }[];
+
+      const countByBin = new Map(
+        bucketRows.map((r) => [Math.min(r.bin_index, HISTOGRAM_BINS - 1), r.count])
+      );
+      const buckets = Array.from({ length: HISTOGRAM_BINS }, (_, i) => ({
+        binIndex: i,
+        count: countByBin.get(i) ?? 0,
+      }));
+
+      return {
+        minTimestampMs: minTs,
+        maxTimestampMs: maxTs,
+        buckets,
+      };
+    }
+  );
+
   ipcMain.handle(
     'db:searchMessages',
     (

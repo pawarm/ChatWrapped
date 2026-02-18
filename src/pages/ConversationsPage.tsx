@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { JumpToDateBar } from '@/components/conversation/JumpToDateBar';
 import { MessageView } from '@/components/conversation/MessageView';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { SearchResult, Thread } from '@/types/conversation';
@@ -59,7 +60,7 @@ function getMessageTimestampFromUrl(
 export function ConversationsPage() {
   const { threadId } = useParams<{ threadId: string }>();
   const { hash } = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +69,10 @@ export function ConversationsPage() {
   const [messageSearch, setMessageSearch] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [dateFilter, setDateFilter] = useState<Date | null>(null);
+  const [visibleTimeRange, setVisibleTimeRange] = useState<{
+    startMs: number;
+    endMs: number;
+  } | null>(null);
   const debouncedSearch = useDebounce(search, 300);
   const debouncedMessageSearch = useDebounce(messageSearch, 400);
 
@@ -98,12 +102,15 @@ export function ConversationsPage() {
       .finally(() => setSearching(false));
   }, [debouncedMessageSearch]);
 
+  useEffect(() => {
+    setVisibleTimeRange(null);
+  }, [threadId]);
+
   const handleSelectThread = useCallback(
     (id: string, messageTimestampMs?: number) => {
-      setDateFilter(null);
       const path = `/conversations/${encodeURIComponent(id)}`;
       if (messageTimestampMs != null) {
-        navigate(`${path}#msg-${messageTimestampMs}`);
+        navigate(`${path}?message=${messageTimestampMs}`);
       } else {
         navigate(path);
       }
@@ -213,53 +220,32 @@ export function ConversationsPage() {
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {threadId && (
-          <div className="flex items-center gap-3 border-b border-border px-4 py-2">
-            <h3 className="min-w-0 flex-1 truncate text-sm font-medium">
-              {threads.find((t) => t.id === threadId)?.title ??
-                searchResults.find((r) => r.thread_id === threadId)
-                  ?.thread_title ??
-                threadId}
-            </h3>
-            <div className="flex shrink-0 items-center gap-2">
-              <label htmlFor="date-nav" className="text-xs text-muted-foreground">
-                Jump to date
-              </label>
-              <input
-                id="date-nav"
-                type="date"
-                value={
-                  dateFilter
-                    ? dateFilter.toISOString().slice(0, 10)
-                    : ''
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setDateFilter(val ? new Date(val + 'T12:00:00') : null);
-                  if (val) setSearchParams({});
-                }}
-                className="rounded border border-input bg-background px-2 py-1 text-xs"
-              />
-              {dateFilter && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDateFilter(null);
-                    setSearchParams({});
-                  }}
-                  className="text-xs text-muted-foreground underline hover:text-foreground"
-                >
-                  Clear
-                </button>
-              )}
+          <div className="flex shrink-0 flex-col border-b border-border">
+            <div className="flex items-center px-4 py-2">
+              <h3 className="min-w-0 flex-1 truncate text-sm font-medium">
+                {threads.find((t) => t.id === threadId)?.title ??
+                  searchResults.find((r) => r.thread_id === threadId)
+                    ?.thread_title ??
+                  threadId}
+              </h3>
             </div>
+            <JumpToDateBar
+              threadId={threadId}
+              visibleTimeRange={visibleTimeRange}
+              onJump={(timestampMs) => {
+                navigate(
+                  `/conversations/${encodeURIComponent(threadId)}?message=${timestampMs}`
+                );
+              }}
+            />
           </div>
         )}
         <MessageView
           threadId={threadId ?? null}
-          dateFilter={dateFilter}
           initialScrollToTimestampMs={
             threadId ? getMessageTimestampFromUrl(hash, searchParams) : null
           }
+          onVisibleTimeRangeChange={setVisibleTimeRange}
         />
       </main>
     </div>

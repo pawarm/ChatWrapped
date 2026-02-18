@@ -18,6 +18,11 @@ declare global {
         limitAfter?: number
       ) => Promise<Message[]>;
       getMessagesAroundDate: (threadId: string, timestampMs: number, limit?: number) => Promise<Message[]>;
+      getMessageHistogram: (threadId: string) => Promise<{
+        minTimestampMs: number;
+        maxTimestampMs: number;
+        buckets: { binIndex: number; count: number }[];
+      } | null>;
       searchMessages: (query: string, limit?: number) => Promise<SearchResult[]>;
       onImportProgress: (callback: (p: ImportProgress) => void) => () => void;
     };
