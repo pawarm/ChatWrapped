@@ -10,6 +10,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const filePath = webUtils.getPathForFile(file);
     return ipcRenderer.invoke('import:start', filePath);
   },
+  inspectZip: (file: File) => {
+    const filePath = webUtils.getPathForFile(file);
+    return ipcRenderer.invoke('import:inspect', filePath);
+  },
+  importZips: (files: File[]) => {
+    const paths = files.map((f) => webUtils.getPathForFile(f));
+    return ipcRenderer.invoke('import:start-multi', paths);
+  },
   getThreads: (search?: string, sort?: 'recent' | 'name') =>
     ipcRenderer.invoke('db:getThreads', { search, sort }),
   getMessages: (threadId: string, limit: number, beforeTimestampMs?: number) =>
@@ -36,8 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db:searchMessages', { query, limit }),
   getStats: () => ipcRenderer.invoke('db:getStats'),
   clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
-  onImportProgress: (callback: (p: { phase: string; current: number; total?: number; threadName?: string }) => void) => {
-    const handler = (_: unknown, payload: { phase: string; current: number; total?: number; threadName?: string }) =>
+  onImportProgress: (callback: (p: { phase: string; current: number; total?: number; threadName?: string; zipIndex?: number; zipTotal?: number }) => void) => {
+    const handler = (_: unknown, payload: { phase: string; current: number; total?: number; threadName?: string; zipIndex?: number; zipTotal?: number }) =>
       callback(payload);
     ipcRenderer.on('import:progress', handler);
     return () => {

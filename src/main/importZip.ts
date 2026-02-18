@@ -1,11 +1,48 @@
 import AdmZip from 'adm-zip';
 import fs from 'fs';
 import path from 'path';
+import yauzl from 'yauzl';
 import type Database from 'better-sqlite3';
 import { classifySpecialMessage } from '../lib/specialMessages';
 import { fixMetaEncoding } from '../lib/utils';
 import { ensureMediaDir, getMediaDir } from './mediaStorage';
-import type { ImportProgress, ImportSummary } from '../types/import';
+import type { ImportProgress, ImportSummary, ZipInspectResult } from '../types/import';
+
+function openZipWithYauzl(zipPath: string): Promise<yauzl.ZipFile> {
+  return new Promise((resolve, reject) => {
+    yauzl.open(
+      zipPath,
+      { lazyEntries: false, autoClose: false },
+      (err, zipfile) => {
+        if (err) reject(err);
+        else resolve(zipfile);
+      }
+    );
+  });
+}
+
+function getEntriesFromYauzl(zipfile: yauzl.ZipFile): Promise<yauzl.Entry[]> {
+  return new Promise((resolve) => {
+    const entries: yauzl.Entry[] = [];
+    zipfile.on('entry', (entry: yauzl.Entry) => entries.push(entry));
+    zipfile.on('end', () => resolve(entries));
+  });
+}
+
+function readEntryAsBuffer(zipfile: yauzl.ZipFile, entry: yauzl.Entry): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (err, stream) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  });
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -63,10 +100,17 @@ function parseMessageFile(zip: AdmZip, entry: AdmZip.IZipEntry): MetaMessageFile
   if (!buffer || buffer.length === 0) {
     throw new Error(`Failed to read: ${entry.entryName}`);
   }
+  return parseMessageBuffer(buffer, entry.entryName);
+}
+
+function parseMessageBuffer(buffer: Buffer, entryName: string): MetaMessageFile {
+  if (!buffer || buffer.length === 0) {
+    throw new Error(`Failed to read: ${entryName}`);
+  }
   const rawText = buffer.toString('utf-8');
   const data = JSON.parse(rawText) as MetaMessageFile;
   if (!data || !Array.isArray(data.participants) || !Array.isArray(data.messages)) {
-    throw new Error(`Invalid structure in ${entry.entryName}`);
+    throw new Error(`Invalid structure in ${entryName}`);
   }
   return data;
 }
@@ -192,6 +236,137 @@ function extractMediaFromZip(
   }
 }
 
+async function extractMediaFromZipYauzl(
+  pooledMap: Map<string, { zipfile: yauzl.ZipFile; entry: yauzl.Entry }>,
+  messageId: number,
+  items: { uri: string; type: MediaType }[],
+  mediaDir: string,
+  insertMedia: { run: (...args: unknown[]) => void }
+): Promise<void> {
+  for (let i = 0; i < items.length; i++) {
+    const { uri, type } = items[i];
+    const normalizedUri = uri.replace(/\\/g, '/');
+    const pooled = pooledMap.get(normalizedUri);
+    if (!pooled) continue;
+    const { zipfile, entry } = pooled;
+    if (entry.fileName.endsWith('/')) continue;
+    try {
+      const buffer = await readEntryAsBuffer(zipfile, entry);
+      if (!buffer || buffer.length === 0) continue;
+      const ext = path.extname(normalizedUri) || '.bin';
+      const safeExt = ext.replace(/[^a-zA-Z0-9.]/g, '_').slice(0, 16) || '.bin';
+      const filename = `${messageId}_${i}_${type}${safeExt}`;
+      const outPath = path.join(mediaDir, filename);
+      fs.writeFileSync(outPath, buffer);
+      const mimeType = getMimeTypeFromUri(uri);
+      insertMedia.run(messageId, type, filename, mimeType, i);
+    } catch {
+      // Skip corrupt/missing media
+    }
+  }
+}
+
+function isMessageEntry(fileName: string): boolean {
+  return (
+    INBOX_MESSAGE_PATTERN.test(fileName) ||
+    ENCRYPTED_MESSAGE_PATTERN.test(fileName) ||
+    E2EE_CUTOVER_MESSAGE_PATTERN.test(fileName)
+  );
+}
+
+/** Check if path is under messages/inbox, e2ee_cutover, or encrypted (Meta export structure) */
+function isMetaMessagesPath(fileName: string): boolean {
+  const n = fileName.replace(/\\/g, '/');
+  return (
+    n.includes('messages/inbox/') ||
+    n.includes('messages/e2ee_cutover/') ||
+    n.includes('messages/encrypted/')
+  );
+}
+
+export async function inspectZip(zipPath: string): Promise<ZipInspectResult> {
+  if (!zipPath || typeof zipPath !== 'string') {
+    return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+  }
+
+  const normalizedPath = path.normalize(zipPath);
+  if (!normalizedPath.toLowerCase().endsWith('.zip')) {
+    return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+  }
+
+  if (!fs.existsSync(normalizedPath)) {
+    return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+  }
+
+  try {
+    const zipfile = await openZipWithYauzl(normalizedPath);
+    try {
+      const entries = await getEntriesFromYauzl(zipfile);
+      zipfile.close();
+
+      const messageEntries = entries.filter(
+        (e) => !e.fileName.endsWith('/') && isMessageEntry(e.fileName)
+      );
+
+      if (messageEntries.length > 0) {
+        const byThread = groupEntriesByThreadYauzl(messageEntries);
+        return {
+          threadCount: byThread.size,
+          messageFileCount: messageEntries.length,
+          format: 'valid',
+        };
+      }
+
+      // No message files - check if it has Meta structure (media-only zip)
+      const hasMetaStructure = entries.some(
+        (e) => !e.fileName.endsWith('/') && isMetaMessagesPath(e.fileName)
+      );
+      if (hasMetaStructure) {
+        return {
+          threadCount: 0,
+          messageFileCount: 0,
+          format: 'valid',
+          mediaOnly: true,
+        };
+      }
+
+      return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+    } catch {
+      zipfile.close();
+      return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+    }
+  } catch {
+    return { threadCount: 0, messageFileCount: 0, format: 'invalid' };
+  }
+}
+
+interface EntryWithSortYauzl {
+  entry: yauzl.Entry;
+  sortNum: number;
+}
+
+function groupEntriesByThreadYauzl(
+  entries: yauzl.Entry[]
+): Map<string, EntryWithSortYauzl[]> {
+  const byThread = new Map<string, EntryWithSortYauzl[]>();
+  for (const entry of entries) {
+    const inboxMatch = entry.fileName.match(INBOX_MESSAGE_PATTERN);
+    const encryptedMatch = entry.fileName.match(ENCRYPTED_MESSAGE_PATTERN);
+    const e2eeCutoverMatch = entry.fileName.match(E2EE_CUTOVER_MESSAGE_PATTERN);
+    const match = inboxMatch ?? encryptedMatch ?? e2eeCutoverMatch;
+    if (!match) continue;
+    const threadKey = extractThreadKey(entry.fileName);
+    const num = parseInt(match[1], 10);
+    const list = byThread.get(threadKey) ?? [];
+    list.push({ entry, sortNum: num });
+    byThread.set(threadKey, list);
+  }
+  for (const list of byThread.values()) {
+    list.sort((a, b) => a.sortNum - b.sortNum);
+  }
+  return byThread;
+}
+
 function groupEntriesByThread(
   entries: AdmZip.IZipEntry[]
 ): Map<string, EntryWithSort[]> {
@@ -214,6 +389,186 @@ function groupEntriesByThread(
   return byThread;
 }
 
+async function importZipWithYauzl(
+  normalizedPath: string,
+  database: Database.Database,
+  onProgress?: (p: ImportProgress) => void
+): Promise<ImportSummary> {
+  const zipfile = await openZipWithYauzl(normalizedPath);
+  const allEntries = await getEntriesFromYauzl(zipfile);
+
+  const pooledEntryMap = new Map<
+    string,
+    { zipfile: yauzl.ZipFile; entry: yauzl.Entry }
+  >();
+  for (const e of allEntries) {
+    if (!e.fileName.endsWith('/')) {
+      const key = e.fileName.replace(/\\/g, '/');
+      pooledEntryMap.set(key, { zipfile, entry: e });
+    }
+  }
+
+  const messageEntries = allEntries.filter(
+    (e) => !e.fileName.endsWith('/') && isMessageEntry(e.fileName)
+  );
+
+  if (messageEntries.length === 0) {
+    zipfile.close();
+    throw new Error(
+      'Unrecognized format. Expected a Meta Messenger export with messages/inbox/, encrypted/, or e2ee_cutover/ message files.'
+    );
+  }
+
+  onProgress?.({ phase: 'extracting', current: 0, total: messageEntries.length });
+
+  const byThread = groupEntriesByThreadYauzl(messageEntries);
+  const threadIds = Array.from(byThread.keys());
+  const totalThreads = threadIds.length;
+
+  let threadsImported = 0;
+  let messagesImported = 0;
+  let reactionsImported = 0;
+
+  ensureMediaDir();
+  const mediaDir = getMediaDir();
+
+  const insertThread = database.prepare(`
+    INSERT OR REPLACE INTO threads (id, title, thread_type, participants_json, created_at)
+    VALUES (?, ?, ?, ?, strftime('%s', 'now'))
+  `);
+  const deleteMediaForThread = database.prepare(`
+    DELETE FROM media WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+  `);
+  const deleteMessages = database.prepare('DELETE FROM messages WHERE thread_id = ?');
+  const deleteReactionsForThread = database.prepare(`
+    DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+  `);
+  const insertMessage = database.prepare(`
+    INSERT INTO messages (thread_id, sender_name, timestamp_ms, content, content_type, special_type)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertReaction = database.prepare(`
+    INSERT INTO reactions (message_id, actor, reaction)
+    VALUES (?, ?, ?)
+  `);
+  const insertMedia = database.prepare(`
+    INSERT INTO media (message_id, media_type, relative_path, mime_type, sort_order)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  try {
+    database.exec('BEGIN TRANSACTION');
+
+    for (let i = 0; i < threadIds.length; i++) {
+      const folderThreadId = threadIds[i];
+      const fileEntries = byThread.get(folderThreadId)!;
+
+      onProgress?.({
+        phase: 'parsing',
+        current: i + 1,
+        total: totalThreads,
+        threadName: undefined,
+      });
+
+      let threadPath: string = folderThreadId;
+      let title = 'Unknown';
+      let threadType = 'Unknown';
+      let participantsJson = '[]';
+      const seenKeys = new Set<string>();
+      const allMessages: MetaMessage[] = [];
+
+      for (const { entry } of fileEntries) {
+        const buffer = await readEntryAsBuffer(zipfile, entry);
+        const data = parseMessageBuffer(buffer, entry.fileName);
+        if (data.thread_path) threadPath = data.thread_path;
+        if (data.title) title = fixMetaEncoding(data.title);
+        if (data.thread_type) threadType = data.thread_type;
+        if (data.participants?.length) {
+          participantsJson = JSON.stringify(
+            data.participants.map((p) => ({
+              name: fixMetaEncoding(p.name ?? ''),
+            }))
+          );
+        }
+        for (const m of data.messages ?? []) {
+          const key = `${m.timestamp_ms ?? 0}\t${m.sender_name ?? ''}\t${(m.content ?? '').slice(0, 100)}`;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          allMessages.push(m);
+        }
+      }
+
+      allMessages.sort((a, b) => (a.timestamp_ms ?? 0) - (b.timestamp_ms ?? 0));
+      const stableThreadId = threadPath;
+      const messagesToInsert = filterEditedDuplicates(allMessages);
+
+      onProgress?.({
+        phase: 'writing',
+        current: threadsImported + 1,
+        total: totalThreads,
+        threadName: title,
+      });
+
+      insertThread.run(stableThreadId, title, threadType, participantsJson);
+      deleteMediaForThread.run(stableThreadId);
+      deleteReactionsForThread.run(stableThreadId);
+      deleteMessages.run(stableThreadId);
+
+      for (const m of messagesToInsert) {
+        const content = m.content != null ? fixMetaEncoding(String(m.content)) : null;
+        const senderName = fixMetaEncoding(m.sender_name ?? 'Unknown');
+        const type = m.type ?? 'Generic';
+        const specialType = classifySpecialMessage({
+          content: m.content,
+          type: m.type,
+          share: m.share,
+        });
+        insertMessage.run(
+          stableThreadId,
+          senderName,
+          m.timestamp_ms ?? 0,
+          content,
+          type,
+          specialType === 'generic' ? null : specialType
+        );
+        const row = database.prepare('SELECT last_insert_rowid() as id').get() as {
+          id: number;
+        };
+        const messageId = row.id;
+
+        const mediaItems = collectMediaItems(m);
+        await extractMediaFromZipYauzl(
+          pooledEntryMap,
+          messageId,
+          mediaItems,
+          mediaDir,
+          insertMedia
+        );
+
+        for (const r of m.reactions ?? []) {
+          insertReaction.run(
+            messageId,
+            fixMetaEncoding(r.actor ?? ''),
+            fixMetaEncoding(r.reaction ?? '')
+          );
+          reactionsImported++;
+        }
+        messagesImported++;
+      }
+      threadsImported++;
+    }
+
+    database.exec('COMMIT');
+  } catch (err) {
+    database.exec('ROLLBACK');
+    zipfile.close();
+    throw err;
+  }
+
+  zipfile.close();
+  return { threadsImported, messagesImported, reactionsImported };
+}
+
 export async function importZip(
   zipPath: string,
   database: Database.Database,
@@ -232,10 +587,15 @@ export async function importZip(
     throw new Error('File not found.');
   }
 
-  let zip: AdmZip;
+  // Try AdmZip first (faster for small files); fall back to yauzl for files > 2GB
+  let zip: AdmZip | null = null;
   try {
     zip = new AdmZip(normalizedPath);
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('ERR_FS_FILE_TOO_LARGE') || msg.includes('2 GiB')) {
+      return importZipWithYauzl(normalizedPath, database, onProgress);
+    }
     throw new Error('Invalid or corrupted ZIP file.');
   }
 
@@ -391,4 +751,282 @@ export async function importZip(
   transaction();
 
   return { threadsImported, messagesImported, reactionsImported };
+}
+
+interface MessageWithSourceZip {
+  message: MetaMessage;
+  sourceZipPath: string;
+}
+
+export async function importZips(
+  zipPaths: string[],
+  database: Database.Database,
+  onProgress?: (p: ImportProgress) => void
+): Promise<ImportSummary> {
+  if (!zipPaths?.length) {
+    throw new Error('No ZIP files selected.');
+  }
+
+  const validPaths = zipPaths.filter(
+    (p) => p && typeof p === 'string' && path.normalize(p).toLowerCase().endsWith('.zip') && fs.existsSync(path.normalize(p))
+  );
+  if (validPaths.length === 0) {
+    throw new Error('No valid ZIP files found.');
+  }
+
+  // Use yauzl for multi-zip import (handles files > 2GB)
+  return importZipsWithYauzl(validPaths, database, onProgress);
+}
+
+async function importZipsWithYauzl(
+  validPaths: string[],
+  database: Database.Database,
+  onProgress?: (p: ImportProgress) => void
+): Promise<ImportSummary> {
+  const zipTotal = validPaths.length;
+  const mergedByThread = new Map<
+    string,
+    { zipPath: string; entries: EntryWithSortYauzl[] }[]
+  >();
+  const zipfiles: yauzl.ZipFile[] = [];
+  const entryMaps: Map<string, yauzl.Entry>[] = [];
+
+  /** Pooled map: path -> { zipfile, entry } from ALL zips, for media lookup */
+  const pooledEntryMap = new Map<
+    string,
+    { zipfile: yauzl.ZipFile; entry: yauzl.Entry }
+  >();
+
+  try {
+    let hasAnyMessages = false;
+
+    for (let zi = 0; zi < validPaths.length; zi++) {
+      const normalizedPath = path.normalize(validPaths[zi]);
+      const zipfile = await openZipWithYauzl(normalizedPath);
+      zipfiles.push(zipfile);
+
+      const allEntries = await getEntriesFromYauzl(zipfile);
+      const entryMap = new Map<string, yauzl.Entry>();
+      for (const e of allEntries) {
+        if (!e.fileName.endsWith('/')) {
+          const key = e.fileName.replace(/\\/g, '/');
+          entryMap.set(key, e);
+          // Add to pooled map (first zip wins if duplicate path)
+          if (!pooledEntryMap.has(key)) {
+            pooledEntryMap.set(key, { zipfile, entry: e });
+          }
+        }
+      }
+      entryMaps.push(entryMap);
+
+      const messageEntries = allEntries.filter(
+        (e) => !e.fileName.endsWith('/') && isMessageEntry(e.fileName)
+      );
+
+      onProgress?.({
+        phase: 'extracting',
+        current: zi + 1,
+        total: zipTotal,
+        zipIndex: zi + 1,
+        zipTotal,
+      });
+
+      if (messageEntries.length > 0) {
+        hasAnyMessages = true;
+        const byThread = groupEntriesByThreadYauzl(messageEntries);
+        for (const [threadKey, fileEntries] of byThread) {
+          const existing = mergedByThread.get(threadKey) ?? [];
+          existing.push({ zipPath: normalizedPath, entries: fileEntries });
+          mergedByThread.set(threadKey, existing);
+        }
+      }
+      // Media-only zips: no messages, but entries already added to pooledEntryMap
+    }
+
+    if (!hasAnyMessages) {
+      throw new Error(
+        'No message data found. At least one ZIP must contain message files (not just media).'
+      );
+    }
+
+    const threadIds = Array.from(mergedByThread.keys());
+  const totalThreads = threadIds.length;
+  let threadsImported = 0;
+  let messagesImported = 0;
+  let reactionsImported = 0;
+
+  ensureMediaDir();
+  const mediaDir = getMediaDir();
+
+  const insertThread = database.prepare(`
+    INSERT OR REPLACE INTO threads (id, title, thread_type, participants_json, created_at)
+    VALUES (?, ?, ?, ?, strftime('%s', 'now'))
+  `);
+  const deleteMediaForThread = database.prepare(`
+    DELETE FROM media WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+  `);
+  const deleteMessages = database.prepare('DELETE FROM messages WHERE thread_id = ?');
+  const deleteReactionsForThread = database.prepare(`
+    DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+  `);
+  const insertMessage = database.prepare(`
+    INSERT INTO messages (thread_id, sender_name, timestamp_ms, content, content_type, special_type)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertReaction = database.prepare(`
+    INSERT INTO reactions (message_id, actor, reaction)
+    VALUES (?, ?, ?)
+  `);
+  const insertMedia = database.prepare(`
+    INSERT INTO media (message_id, media_type, relative_path, mime_type, sort_order)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  const zipPathToIndex = new Map(
+    validPaths.map((p, i) => [path.normalize(p), i])
+  );
+
+  database.exec('BEGIN TRANSACTION');
+
+  try {
+    for (let i = 0; i < threadIds.length; i++) {
+      const folderThreadId = threadIds[i];
+      const sources = mergedByThread.get(folderThreadId)!;
+
+      onProgress?.({
+        phase: 'parsing',
+        current: i + 1,
+        total: totalThreads,
+        zipIndex: 1,
+        zipTotal,
+      });
+
+      let threadPath: string = folderThreadId;
+      let title = 'Unknown';
+      let threadType = 'Unknown';
+      let participantsJson = '[]';
+      const seenKeys = new Set<string>();
+      const messagesWithSource: MessageWithSourceZip[] = [];
+
+      for (const { zipPath, entries: fileEntries } of sources) {
+        const zipIndex = zipPathToIndex.get(zipPath) ?? 0;
+        const zipfile = zipfiles[zipIndex];
+
+        for (const { entry } of fileEntries) {
+          const buffer = await readEntryAsBuffer(zipfile, entry);
+          const data = parseMessageBuffer(buffer, entry.fileName);
+          if (data.thread_path) threadPath = data.thread_path;
+          if (data.title) title = fixMetaEncoding(data.title);
+          if (data.thread_type) threadType = data.thread_type;
+          if (data.participants?.length) {
+            participantsJson = JSON.stringify(
+              data.participants.map((p) => ({
+                name: fixMetaEncoding(p.name ?? ''),
+              }))
+            );
+          }
+          for (const m of data.messages ?? []) {
+            const key = `${m.timestamp_ms ?? 0}\t${m.sender_name ?? ''}\t${(m.content ?? '').slice(0, 100)}`;
+            if (seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            messagesWithSource.push({ message: m, sourceZipPath: zipPath });
+          }
+        }
+      }
+
+      messagesWithSource.sort(
+        (a, b) => (a.message.timestamp_ms ?? 0) - (b.message.timestamp_ms ?? 0)
+      );
+
+      const stableThreadId = threadPath;
+      const allMessages = messagesWithSource.map((m) => m.message);
+      const messagesToInsert = filterEditedDuplicates(allMessages);
+
+      const byKey = new Map<string, MessageWithSourceZip>();
+      for (const mws of messagesWithSource) {
+        const key = `${mws.message.timestamp_ms ?? 0}\t${mws.message.sender_name ?? ''}\t${(mws.message.content ?? '').slice(0, 100)}`;
+        byKey.set(key, mws);
+      }
+      const finalToInsert: MessageWithSourceZip[] = [];
+      for (const m of messagesToInsert) {
+        const key = `${m.timestamp_ms ?? 0}\t${m.sender_name ?? ''}\t${(m.content ?? '').slice(0, 100)}`;
+        const mws = byKey.get(key);
+        if (mws) finalToInsert.push(mws);
+      }
+
+      onProgress?.({
+        phase: 'writing',
+        current: threadsImported + 1,
+        total: totalThreads,
+        threadName: title,
+        zipIndex: zipTotal,
+        zipTotal,
+      });
+
+      insertThread.run(stableThreadId, title, threadType, participantsJson);
+      deleteMediaForThread.run(stableThreadId);
+      deleteReactionsForThread.run(stableThreadId);
+      deleteMessages.run(stableThreadId);
+
+      for (const { message: m } of finalToInsert) {
+        const content = m.content != null ? fixMetaEncoding(String(m.content)) : null;
+        const senderName = fixMetaEncoding(m.sender_name ?? 'Unknown');
+        const type = m.type ?? 'Generic';
+        const specialType = classifySpecialMessage({
+          content: m.content,
+          type: m.type,
+          share: m.share,
+        });
+        insertMessage.run(
+          stableThreadId,
+          senderName,
+          m.timestamp_ms ?? 0,
+          content,
+          type,
+          specialType === 'generic' ? null : specialType
+        );
+        const row = database.prepare('SELECT last_insert_rowid() as id').get() as {
+          id: number;
+        };
+        const messageId = row.id;
+
+        const mediaItems = collectMediaItems(m);
+        await extractMediaFromZipYauzl(
+          pooledEntryMap,
+          messageId,
+          mediaItems,
+          mediaDir,
+          insertMedia
+        );
+
+        for (const r of m.reactions ?? []) {
+          insertReaction.run(
+            messageId,
+            fixMetaEncoding(r.actor ?? ''),
+            fixMetaEncoding(r.reaction ?? '')
+          );
+          reactionsImported++;
+        }
+        messagesImported++;
+      }
+      threadsImported++;
+    }
+
+    database.exec('COMMIT');
+    } catch (err) {
+      database.exec('ROLLBACK');
+      throw err;
+    } finally {
+      for (const zf of zipfiles) {
+        zf.close();
+      }
+    }
+
+    return { threadsImported, messagesImported, reactionsImported };
+  } catch (err) {
+    for (const zf of zipfiles) {
+      zf.close();
+    }
+    throw err;
+  }
 }

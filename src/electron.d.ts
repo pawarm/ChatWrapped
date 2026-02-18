@@ -1,4 +1,4 @@
-import type { ImportProgress, ImportResult, ImportSummary } from './types/import';
+import type { ImportProgress, ImportResult, ImportSummary, ZipInspectResult } from './types/import';
 import type { Message, SearchResult, StatsSummary, Thread } from './types/conversation';
 
 declare global {
@@ -6,6 +6,8 @@ declare global {
     electronAPI: {
       getMediaUrl: (filename: string) => string;
       importZip: (file: File) => Promise<ImportSummary>;
+      inspectZip: (file: File) => Promise<ZipInspectResult>;
+      importZips: (files: File[]) => Promise<ImportSummary>;
       getStats: () => Promise<StatsSummary>;
       clearAllData: () => Promise<void>;
       getThreads: (search?: string, sort?: 'recent' | 'name') => Promise<Thread[]>;
@@ -29,7 +31,7 @@ declare global {
   }
 }
 
-export type { ImportProgress, ImportResult, ImportSummary };
+export type { ImportProgress, ImportResult, ImportSummary, ZipInspectResult };
 export type { Message, SearchResult, StatsSummary, Thread };
 
 export {};
