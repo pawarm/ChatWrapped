@@ -17,9 +17,13 @@ const config: ForgeConfig = {
     asar: true,
     executableName: 'chatwrapped',
     icon: path.join(__dirname, 'assets', 'app-logo'),
-    // macOS signing (only when env vars set)
-    osxSign: process.env.APPLE_ID ? {} : undefined,
+    // macOS signing requires Developer ID cert (CSC_LINK) in keychain; notarization needs APPLE_* credentials
+    osxSign:
+      process.env.CSC_LINK && process.env.CSC_KEY_PASSWORD
+        ? { keychain: process.env.CI ? 'build.keychain' : undefined }
+        : undefined,
     osxNotarize:
+      process.env.CSC_LINK &&
       process.env.APPLE_ID &&
       process.env.APPLE_APP_SPECIFIC_PASSWORD &&
       process.env.APPLE_TEAM_ID
