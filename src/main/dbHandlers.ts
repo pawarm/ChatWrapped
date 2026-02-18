@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import type Database from 'better-sqlite3';
 import { fixMetaEncoding } from '../lib/utils';
-import { clearMediaStorage } from './mediaStorage';
+import { clearMediaStorage, getStorageSizeBytes } from './mediaStorage';
 import type { MediaItem, Message, SearchResult, StatsSummary, Thread } from '../types/conversation';
 
 function attachMediaToMessages(
@@ -70,6 +70,10 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
       firstMessageAt: row.first_message_at ?? null,
       lastMessageAt: row.last_message_at ?? null,
     };
+  });
+
+  ipcMain.handle('db:getStorageSize', (): number => {
+    return getStorageSizeBytes();
   });
 
   ipcMain.handle('db:clearAllData', (): void => {

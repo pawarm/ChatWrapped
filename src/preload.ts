@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchMessages: (query: string, limit?: number) =>
     ipcRenderer.invoke('db:searchMessages', { query, limit }),
   getStats: () => ipcRenderer.invoke('db:getStats'),
+  getStorageSize: () => ipcRenderer.invoke('db:getStorageSize') as Promise<number>,
   clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
   onImportProgress: (callback: (p: { phase: string; current: number; total?: number; threadName?: string; zipIndex?: number; zipTotal?: number }) => void) => {
     const handler = (_: unknown, payload: { phase: string; current: number; total?: number; threadName?: string; zipIndex?: number; zipTotal?: number }) =>

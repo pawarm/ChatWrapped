@@ -19,6 +19,7 @@ function fileKey(file: File): string {
 export function ImportPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats] = useState<StatsSummary | null>(null);
+  const [storageSizeBytes, setStorageSizeBytes] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileDetails, setFileDetails] = useState<Record<string, ZipInspectResult | 'loading'>>({});
@@ -207,6 +208,14 @@ export function ImportPage() {
     window.electronAPI.getStats().then(setStats);
   }, [result]);
 
+  useEffect(() => {
+    if (stats != null && stats.messageCount > 0) {
+      window.electronAPI.getStorageSize().then(setStorageSizeBytes);
+    } else {
+      setStorageSizeBytes(null);
+    }
+  }, [stats?.messageCount, result]);
+
   const handleClearData = useCallback(async () => {
     if (
       !window.confirm(
@@ -227,6 +236,7 @@ export function ImportPage() {
         firstMessageAt: null,
         lastMessageAt: null,
       });
+      setStorageSizeBytes(null);
       setResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear data.');
@@ -427,8 +437,18 @@ export function ImportPage() {
           <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
             <h3 className="text-sm font-medium">Clear imported data</h3>
             <p className="text-sm text-muted-foreground">
-              Remove all conversations, messages, and reactions from the
-              database. You can import again afterwards.
+              {storageSizeBytes != null ? (
+                <>
+                  Currently using {formatFileSize(storageSizeBytes)} of storage
+                  (messages and media). Remove all conversations, messages, and
+                  reactions from the database. You can import again afterwards.
+                </>
+              ) : (
+                <>
+                  Remove all conversations, messages, and reactions from the
+                  database. You can import again afterwards.
+                </>
+              )}
             </p>
             <Button
               type="button"

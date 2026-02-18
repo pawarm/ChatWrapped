@@ -9,6 +9,7 @@ declare global {
       inspectZip: (file: File) => Promise<ZipInspectResult>;
       importZips: (files: File[]) => Promise<ImportSummary>;
       getStats: () => Promise<StatsSummary>;
+      getStorageSize: () => Promise<number>;
       clearAllData: () => Promise<void>;
       getThreads: (search?: string, sort?: 'recent' | 'name') => Promise<Thread[]>;
       getMessages: (threadId: string, limit: number, beforeTimestampMs?: number) => Promise<Message[]>;
