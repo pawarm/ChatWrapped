@@ -2,18 +2,19 @@
 
 A local-first desktop app to import, browse, and explore your Meta/Facebook Messenger data export. All processing happens on your machine—your messages never leave your device.
 
-📖 **[User Guide](docs/USER_GUIDE.md)** — What the app does, what you need, and how to get your Messenger export from Meta.
+[User Guide](docs/USER_GUIDE.md) — What the app does, what you need, and how to get your Messenger export from Meta.
 
-![Electron](https://img.shields.io/badge/Electron-40-47848F?logo=electron)
+![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)
+![Rust](https://img.shields.io/badge/Rust-Backend-DEA584?logo=rust)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
 ## Features
 
-- **Import** — Select or drag-and-drop your Meta Messenger export ZIP; media is extracted and stored locally
+- **Import** — Select your Meta Messenger export ZIP files; media is extracted and stored locally
 - **Media display** — View photos, videos, GIFs, audio, and files inline in the message view
 - **Browse** — View conversations with infinite scroll, date picker, and a message histogram to jump to any date
 - **Search** — Search across conversations or within messages; click a result to open it
@@ -30,26 +31,32 @@ A local-first desktop app to import, browse, and explore your Meta/Facebook Mess
 
 Pre-built releases for Windows, macOS (Intel and Apple Silicon), and Linux are available on [GitHub Releases](https://github.com/pawarm/ChatWrapped/releases).
 
-- **macOS**: Download the `.zip` for your chip (arm64 for Apple Silicon, x64 for Intel), unzip, and move ChatWrapped to Applications.
-- **Windows**: Download the `.exe` installer and run it.
-- **Linux**: Download the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) package and install with your package manager.
+- **macOS**: Download the `.dmg` for your chip (arm64 for Apple Silicon, x64 for Intel) and install.
+- **Windows**: Download the `.msi` installer and run it.
+- **Linux**: Download the `.deb` (Debian/Ubuntu) or `.AppImage` and install.
 
 ### Build from Source
 
-**Prerequisites:** Node.js v20 or later (LTS recommended), npm
+**Prerequisites:** [Rust](https://rustup.rs/) (stable), [Bun](https://bun.sh/) v1+
 
 ```bash
 git clone https://github.com/pawarm/ChatWrapped.git
 cd ChatWrapped
-npm install
-npm start
+bun install
+bun run tauri:dev
+```
+
+For a production build:
+
+```bash
+bun run tauri:build
 ```
 
 ### How to Get Your Data
 
 See the [User Guide](docs/USER_GUIDE.md) for a detailed step-by-step with screenshots. Quick version:
 
-1. Go to [Meta Accounts Center](https://accountscenter.facebook.com/) → Your Information and Permissions → Download your Information
+1. Go to [Meta Accounts Center](https://www.facebook.com/accountscenter/) → Your Information and Permissions → Download your Information
 2. Select **Messages**, **JSON** format, and your date range
 3. Wait for Meta to prepare the export (typically 24–72 hours)
 4. Download the ZIP and import it in ChatWrapped
@@ -58,21 +65,26 @@ See the [User Guide](docs/USER_GUIDE.md) for a detailed step-by-step with screen
 
 ## Tech Stack
 
-- **Electron** + **Electron Forge**
-- **React 19** + **TypeScript**
-- **Tailwind CSS v4** + **shadcn/ui**
-- **SQLite** (better-sqlite3)
+- **Tauri v2** — Desktop shell (Rust backend, system webview)
+- **React 19** + **TypeScript** — Frontend
+- **Vite** — Build tooling
+- **Bun** — JavaScript runtime and package manager
+- **Tailwind CSS v4** + **shadcn/ui** — Styling
+- **SQLite** (rusqlite) — Local database
+- **Rust** — Backend logic (ZIP processing, database, media storage)
 
 ---
 
 ## Scripts
 
-| Command           | Description              |
-|-------------------|--------------------------|
-| `npm start`       | Start in development     |
-| `npm run make`    | Build distributables      |
-| `npm run lint`    | Run ESLint               |
-| `npm run typecheck` | Type-check with tsc   |
+| Command | Description |
+|---|---|
+| `bun run dev` | Start Vite dev server |
+| `bun run tauri:dev` | Start Tauri in development |
+| `bun run tauri:build` | Build production distributables |
+| `bun run build` | Build frontend only |
+| `bun run lint` | Run ESLint |
+| `bun run typecheck` | Type-check with tsc |
 
 ---
 

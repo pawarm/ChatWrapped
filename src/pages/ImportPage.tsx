@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api';
 import type { StatsSummary } from '@/types/conversation';
 import type { ZipInspectResult } from '@/types/import';
 
@@ -12,16 +14,19 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function fileKey(file: File): string {
-  return `${file.name}-${file.size}-${file.lastModified}`;
+interface SelectedFile {
+  path: string;
+  name: string;
+}
+
+function fileKey(file: SelectedFile): string {
+  return file.path;
 }
 
 export function ImportPage() {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [storageSizeBytes, setStorageSizeBytes] = useState<number | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [fileDetails, setFileDetails] = useState<Record<string, ZipInspectResult | 'loading'>>({});
   const [isImporting, setIsImporting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -52,15 +57,14 @@ export function ImportPage() {
   const hasValidFiles = validFiles.length > 0 && hasMessageFiles;
   const isInspecting = selectedFiles.some((f) => fileDetails[fileKey(f)] === 'loading');
 
-  // Inspect each selected file when selection changes
   useEffect(() => {
     if (selectedFiles.length === 0) return;
 
-    const inspect = async (file: File) => {
+    const inspect = async (file: SelectedFile) => {
       const key = fileKey(file);
       setFileDetails((prev) => ({ ...prev, [key]: 'loading' }));
       try {
-        const details = await window.electronAPI.inspectZip(file);
+        const details = await api.inspectZip(file.path);
         setFileDetails((prev) => ({ ...prev, [key]: details }));
       } catch {
         setFileDetails((prev) => ({
@@ -78,27 +82,20 @@ export function ImportPage() {
     }
   }, [selectedFiles]);
 
-  const addFiles = useCallback((files: FileList | File[]) => {
-    const zipFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.zip'));
-    if (zipFiles.length === 0) {
+  const addFilePaths = useCallback((paths: string[]) => {
+    const zipPaths = paths.filter((p) => p.toLowerCase().endsWith('.zip'));
+    if (zipPaths.length === 0) {
       setError('Please select ZIP files.');
       return;
     }
     setError(null);
     setResult(null);
 
-    // Deduplicate by name + size + lastModified
-    const seen = new Set<string>();
-    const newFiles: File[] = [];
-    for (const f of zipFiles) {
-      const k = fileKey(f);
-      if (!seen.has(k)) {
-        seen.add(k);
-        newFiles.push(f);
-      }
-    }
+    const newFiles: SelectedFile[] = zipPaths.map((p) => ({
+      path: p,
+      name: p.split('/').pop() ?? p,
+    }));
 
-    // Merge with existing, avoiding duplicates
     setSelectedFiles((prev) => {
       const prevKeys = new Set(prev.map(fileKey));
       const toAdd = newFiles.filter((f) => !prevKeys.has(fileKey(f)));
@@ -106,7 +103,7 @@ export function ImportPage() {
     });
   }, []);
 
-  const removeFile = useCallback((file: File) => {
+  const removeFile = useCallback((file: SelectedFile) => {
     setSelectedFiles((prev) => prev.filter((f) => fileKey(f) !== fileKey(file)));
     setFileDetails((prev) => {
       const next = { ...prev };
@@ -128,7 +125,7 @@ export function ImportPage() {
     setProgress(null);
     setIsImporting(true);
 
-    const unsubscribe = window.electronAPI.onImportProgress((p) => {
+    const unsubscribe = await api.onImportProgress((p) => {
       setProgress({
         phase: p.phase,
         current: p.current,
@@ -140,7 +137,8 @@ export function ImportPage() {
     });
 
     try {
-      const data = await window.electronAPI.importZips(validFiles);
+      const paths = validFiles.map((f) => f.path);
+      const data = await api.importZips(paths);
       setResult({
         threadsImported: data.threadsImported,
         messagesImported: data.messagesImported,
@@ -149,7 +147,7 @@ export function ImportPage() {
       setSelectedFiles([]);
       setFileDetails({});
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import failed.');
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       unsubscribe();
       setIsImporting(false);
@@ -157,60 +155,32 @@ export function ImportPage() {
     }
   }, [hasValidFiles, validFiles]);
 
-  const handleSelectClick = () => {
-    if (!isImporting) {
-      inputRef.current?.click();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files?.length) {
-      addFiles(files);
-    }
-    e.target.value = '';
-  };
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isImporting) {
-      setIsDragging(true);
-    }
-  }, [isImporting]);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
-      if (isImporting) return;
-      const files = e.dataTransfer.files;
-      if (files?.length) {
-        const zips = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.zip'));
-        if (zips.length > 0) {
-          addFiles(zips);
-        } else {
-          setError('Please drop ZIP files.');
-        }
+  const handleSelectClick = async () => {
+    if (isImporting) return;
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{ name: 'ZIP files', extensions: ['zip'] }],
+      });
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+        addFilePaths(paths);
       }
-    },
-    [addFiles, isImporting]
-  );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg && !msg.toLowerCase().includes('cancel')) {
+        setError(`File dialog error: ${msg}`);
+      }
+    }
+  };
 
   useEffect(() => {
-    window.electronAPI.getStats().then(setStats);
+    api.getStats().then(setStats);
   }, [result]);
 
   useEffect(() => {
     if (stats != null && stats.messageCount > 0) {
-      window.electronAPI.getStorageSize().then(setStorageSizeBytes);
+      api.getStorageSize().then(setStorageSizeBytes);
     } else {
       setStorageSizeBytes(null);
     }
@@ -227,7 +197,7 @@ export function ImportPage() {
     setError(null);
     setIsClearing(true);
     try {
-      await window.electronAPI.clearAllData();
+      await api.clearAllData();
       setStats({
         threadCount: 0,
         messageCount: 0,
@@ -257,9 +227,7 @@ export function ImportPage() {
         ? `Parsing threads (${progress.current}${progress.total ? ` / ${progress.total}` : ''})...`
         : progress?.phase === 'writing'
           ? progress.threadName
-            ? progress.zipTotal && progress.zipTotal > 1
-              ? `Importing: ${progress.threadName}`
-              : `Importing: ${progress.threadName}`
+            ? `Importing: ${progress.threadName}`
             : `Writing (${progress.current}${progress.total ? ` / ${progress.total}` : ''})...`
           : 'Importing...';
 
@@ -299,42 +267,16 @@ export function ImportPage() {
         >
           {selectedFiles.length > 0 ? 'Add more ZIP files' : 'Select ZIP files'}
         </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".zip"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-          aria-hidden
-          disabled={isDisabled}
-        />
 
         {!isPreviewStage && !isImporting && (
           <div
-            role="button"
-            tabIndex={0}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                handleSelectClick();
-              }
-            }}
-            aria-disabled={isDisabled}
-            className={`flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors ${
-              isDragging && !isDisabled
-                ? 'border-primary bg-accent'
-                : 'border-border hover:border-muted-foreground/50'
-            } ${isDisabled ? 'pointer-events-none opacity-60' : ''}`}
+            className="flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors border-border hover:border-muted-foreground/50"
           >
             <p className="text-sm font-medium text-muted-foreground">
-              Drop your messages ZIP files here
+              Click the button above to select your ZIP files
             </p>
             <p className="text-xs text-muted-foreground">
-              or click the button above to browse (you can select multiple files)
+              You can select multiple files at once
             </p>
           </div>
         )}
@@ -364,13 +306,12 @@ export function ImportPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{file.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatFileSize(file.size)}
-                        {isLoading && ' — Inspecting…'}
+                        {isLoading && 'Inspecting…'}
                         {details && details !== 'loading' && details.format === 'valid' && !details.mediaOnly &&
-                          ` — ${details.threadCount} threads, ${details.messageFileCount} message files`}
+                          `${details.threadCount} threads, ${details.messageFileCount} message files`}
                         {details && details !== 'loading' && details.format === 'valid' && details.mediaOnly &&
-                          ' — Media only (photos, videos, etc.)'}
-                        {details && details !== 'loading' && details.format === 'invalid' && ' — Unrecognized format'}
+                          'Media only (photos, videos, etc.)'}
+                        {details && details !== 'loading' && details.format === 'invalid' && 'Unrecognized format'}
                       </p>
                     </div>
                     <Button
