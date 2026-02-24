@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { api } from '@/lib/api';
 
 interface JumpToDateBarProps {
   threadId: string | null;
@@ -40,7 +41,7 @@ export function JumpToDateBar({
       return;
     }
     setLoading(true);
-    window.electronAPI
+    api
       .getMessageHistogram(threadId)
       .then((data) => {
         setHistogram(data ?? null);

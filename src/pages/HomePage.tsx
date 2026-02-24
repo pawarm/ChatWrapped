@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { api } from '@/lib/api';
 import type { StatsSummary } from '@/types/conversation';
 
 function formatDateRange(firstMs: number | null, lastMs: number | null): string {
@@ -57,7 +58,7 @@ export function HomePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    window.electronAPI
+    api
       .getStats()
       .then((data) => {
         if (!cancelled) setStats(data);

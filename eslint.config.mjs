@@ -20,7 +20,7 @@ const sharedExtends = fixupConfigRules(compat.extends(
     "plugin:@typescript-eslint/eslint-recommended",
     "plugin:@typescript-eslint/recommended",
     "plugin:import/recommended",
-    "plugin:import/electron",
+    
     "plugin:import/typescript",
 ));
 
@@ -37,7 +37,7 @@ const sharedSettings = {
 };
 
 export default defineConfig([
-    { ignores: ["**/node_modules/**", "**/.webpack/**", "**/dist/**"] },
+    { ignores: ["**/node_modules/**", "**/dist/**", "**/src-tauri/**"] },
     {
         files: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs"],
         extends: sharedExtends,

@@ -2,55 +2,54 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 const VISIBLE_RANGE_THROTTLE_MS = 100;
 import { Skeleton } from '@/components/ui/skeleton';
+import { api } from '@/lib/api';
 import type { MediaItem, Message } from '@/types/conversation';
+
+function MediaItemView({ item }: { item: MediaItem }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getMediaUrl(item.relative_path).then(setUrl);
+  }, [item.relative_path]);
+
+  if (!url) return null;
+
+  if (item.media_type === 'photo' || item.media_type === 'gif' || item.media_type === 'sticker') {
+    return (
+      <img src={url} alt="" className="max-h-64 max-w-full rounded-lg object-contain" />
+    );
+  }
+  if (item.media_type === 'video') {
+    return (
+      <video src={url} controls className="max-h-64 max-w-full rounded-lg" />
+    );
+  }
+  if (item.media_type === 'audio') {
+    return <audio src={url} controls className="max-w-full" />;
+  }
+  if (item.media_type === 'file') {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted/50"
+      >
+        <span aria-hidden>📎</span>
+        {item.relative_path}
+      </a>
+    );
+  }
+  return null;
+}
 
 function MediaSection({ items }: { items: MediaItem[] }) {
   if (items.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">
-      {items.map((item) => {
-        const url = window.electronAPI.getMediaUrl(item.relative_path);
-        if (item.media_type === 'photo' || item.media_type === 'gif' || item.media_type === 'sticker') {
-          return (
-            <img
-              key={item.id}
-              src={url}
-              alt=""
-              className="max-h-64 max-w-full rounded-lg object-contain"
-            />
-          );
-        }
-        if (item.media_type === 'video') {
-          return (
-            <video
-              key={item.id}
-              src={url}
-              controls
-              className="max-h-64 max-w-full rounded-lg"
-            />
-          );
-        }
-        if (item.media_type === 'audio') {
-          return (
-            <audio key={item.id} src={url} controls className="max-w-full" />
-          );
-        }
-        if (item.media_type === 'file') {
-          return (
-            <a
-              key={item.id}
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted/50"
-            >
-              <span aria-hidden>📎</span>
-              {item.relative_path}
-            </a>
-          );
-        }
-        return null;
-      })}
+      {items.map((item) => (
+        <MediaItemView key={item.id} item={item} />
+      ))}
     </div>
   );
 }
@@ -363,7 +362,7 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs, 
       const loadingForThreadId = threadId;
       if (beforeTimestampMs == null) setLoading(true);
       try {
-        const batch = await window.electronAPI.getMessages(
+        const batch = await api.getMessages(
           threadId,
           MESSAGE_LIMIT,
           beforeTimestampMs
@@ -400,7 +399,7 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs, 
     async (afterTimestampMs: number): Promise<Message[]> => {
       if (!threadId) return [];
       const loadingForThreadId = threadId;
-      const batch = await window.electronAPI.getMessagesAfter(
+      const batch = await api.getMessagesAfter(
         threadId,
         afterTimestampMs,
         MESSAGE_LIMIT
@@ -426,7 +425,7 @@ export function MessageView({ threadId, dateFilter, initialScrollToTimestampMs, 
       setHasMoreNewer(true);
       initialScrollToTimestampRef.current = timestampMs;
       try {
-        const data = await window.electronAPI.getMessagesAroundTimestamp(
+        const data = await api.getMessagesAroundTimestamp(
           threadId,
           timestampMs,
           MESSAGE_LIMIT,
