@@ -70,6 +70,7 @@ bun.lockb
 
 # Test data
 your_facebook_activity/
+test-data/
 
 # Icon build output (intermediate)
 assets/icons/
