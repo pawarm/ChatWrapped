@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use crate::models::ZipInspectResult;
 use super::meta_format::{extract_thread_key, is_message_entry, is_meta_messages_path};
+use crate::models::ZipInspectResult;
 
 #[tauri::command]
 pub async fn inspect_zip(zip_path: String) -> Result<ZipInspectResult, String> {

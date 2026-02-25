@@ -25,8 +25,10 @@ fn attach_reactions_and_media(
         "SELECT message_id, actor, reaction FROM reactions WHERE message_id IN ({placeholders})"
     );
     let mut reaction_stmt = conn.prepare(&reaction_sql).map_err(|e| e.to_string())?;
-    let reaction_params: Vec<&dyn rusqlite::types::ToSql> =
-        ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let reaction_params: Vec<&dyn rusqlite::types::ToSql> = ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
     let reaction_rows = reaction_stmt
         .query_map(reaction_params.as_slice(), |row| {
             Ok((
@@ -41,13 +43,10 @@ fn attach_reactions_and_media(
         std::collections::HashMap::new();
     for row in reaction_rows {
         let (msg_id, actor, reaction) = row.map_err(|e| e.to_string())?;
-        reactions_map
-            .entry(msg_id)
-            .or_default()
-            .push(Reaction {
-                actor: fix_meta_encoding(&actor),
-                reaction: fix_meta_encoding(&reaction),
-            });
+        reactions_map.entry(msg_id).or_default().push(Reaction {
+            actor: fix_meta_encoding(&actor),
+            reaction: fix_meta_encoding(&reaction),
+        });
     }
 
     // Media
@@ -56,8 +55,10 @@ fn attach_reactions_and_media(
          FROM media WHERE message_id IN ({placeholders}) ORDER BY message_id, sort_order"
     );
     let mut media_stmt = conn.prepare(&media_sql).map_err(|e| e.to_string())?;
-    let media_params: Vec<&dyn rusqlite::types::ToSql> =
-        ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let media_params: Vec<&dyn rusqlite::types::ToSql> = ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
     let media_rows = media_stmt
         .query_map(media_params.as_slice(), |row| {
             Ok((
@@ -73,8 +74,7 @@ fn attach_reactions_and_media(
     let mut media_map: std::collections::HashMap<i64, Vec<MediaItem>> =
         std::collections::HashMap::new();
     for row in media_rows {
-        let (id, msg_id, media_type, relative_path, mime_type) =
-            row.map_err(|e| e.to_string())?;
+        let (id, msg_id, media_type, relative_path, mime_type) = row.map_err(|e| e.to_string())?;
         media_map.entry(msg_id).or_default().push(MediaItem {
             id,
             media_type,
@@ -180,9 +180,7 @@ pub fn get_threads(
         let search_pattern = if search_trimmed.trim().is_empty() {
             None
         } else {
-            let escaped = search_trimmed
-                .replace('%', "\\%")
-                .replace('_', "\\_");
+            let escaped = search_trimmed.replace('%', "\\%").replace('_', "\\_");
             Some(format!("%{escaped}%"))
         };
 
@@ -224,7 +222,9 @@ pub fn get_threads(
         };
 
         if let Some(ref pattern) = search_pattern {
-            let rows = stmt.query_map(params![pattern], map_row).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![pattern], map_row)
+                .map_err(|e| e.to_string())?;
             for row in rows {
                 threads.push(row.map_err(|e| e.to_string())?);
             }
@@ -252,9 +252,12 @@ pub fn get_messages(
             return Ok(vec![]);
         }
 
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            if let Some(before_ts) = before_timestamp_ms {
-                (
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(
+            before_ts,
+        ) =
+            before_timestamp_ms
+        {
+            (
                     format!("SELECT {MSG_COLUMNS} FROM messages WHERE thread_id = ?1 AND timestamp_ms < ?2 ORDER BY timestamp_ms DESC LIMIT ?3"),
                     vec![
                         Box::new(thread_id.clone()),
@@ -262,12 +265,12 @@ pub fn get_messages(
                         Box::new(lim),
                     ],
                 )
-            } else {
-                (
+        } else {
+            (
                     format!("SELECT {MSG_COLUMNS} FROM messages WHERE thread_id = ?1 ORDER BY timestamp_ms DESC LIMIT ?2"),
                     vec![Box::new(thread_id.clone()), Box::new(lim)],
                 )
-            };
+        };
 
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -438,9 +441,7 @@ pub fn get_message_histogram(
         let rows = stmt
             .query_map(
                 params![min_ts, HISTOGRAM_BINS - 1, divisor, thread_id],
-                |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-                },
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
             )
             .map_err(|e| e.to_string())?;
 
@@ -478,10 +479,7 @@ pub fn search_messages(
             return Ok(vec![]);
         }
         let lim = limit.unwrap_or(50);
-        let pattern = format!(
-            "%{}%",
-            trimmed.replace('%', "\\%").replace('_', "\\_")
-        );
+        let pattern = format!("%{}%", trimmed.replace('%', "\\%").replace('_', "\\_"));
 
         let mut stmt = conn
             .prepare(

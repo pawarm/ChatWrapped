@@ -10,15 +10,14 @@ use super::meta_format::{MetaMediaItem, MetaMessage};
 static RE_GROUP_EVENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)named the group|added .+ to the group|added you to the group|removed .+ from the group|left the group|A contact left the group").unwrap()
 });
-static RE_POLL_CREATION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)created a poll:").unwrap()
-});
+static RE_POLL_CREATION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)created a poll:").unwrap());
 static RE_POLL_VOTE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)voted for .+ in the poll|changed their vote to|removed their vote for").unwrap()
+    Regex::new(r"(?i)voted for .+ in the poll|changed their vote to|removed their vote for")
+        .unwrap()
 });
-static RE_LIVE_LOCATION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)sent a live location").unwrap()
-});
+static RE_LIVE_LOCATION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)sent a live location").unwrap());
 
 // ---- Special message classification ----
 
@@ -75,7 +74,10 @@ fn push_items(items: &mut Vec<MediaRef>, media: &Option<Vec<MetaMediaItem>>, med
     if let Some(list) = media {
         for item in list {
             if let Some(uri) = &item.uri {
-                items.push(MediaRef { uri: uri.clone(), media_type: media_type.into() });
+                items.push(MediaRef {
+                    uri: uri.clone(),
+                    media_type: media_type.into(),
+                });
             }
         }
     }
@@ -90,7 +92,10 @@ pub fn collect_media_items(msg: &MetaMessage) -> Vec<MediaRef> {
     push_items(&mut items, &msg.files, "file");
     if let Some(sticker) = &msg.sticker {
         if let Some(uri) = sticker.get("uri").and_then(|v| v.as_str()) {
-            items.push(MediaRef { uri: uri.to_string(), media_type: "sticker".into() });
+            items.push(MediaRef {
+                uri: uri.to_string(),
+                media_type: "sticker".into(),
+            });
         }
     }
     items
@@ -116,19 +121,19 @@ pub fn filter_edited_duplicates(messages: &mut Vec<MetaMessage>) {
         let sender = messages[i].sender_name.as_deref().unwrap_or("");
         let ts = messages[i].timestamp_ms.unwrap_or(0);
 
-        for j in 0..messages.len() {
+        for (j, other_msg) in messages.iter().enumerate() {
             if i == j {
                 continue;
             }
-            let other_content = messages[j].content.as_deref().unwrap_or("");
+            let other_content = other_msg.content.as_deref().unwrap_or("");
             if !other_content.ends_with(edit_suffix) {
                 continue;
             }
-            let other_sender = messages[j].sender_name.as_deref().unwrap_or("");
+            let other_sender = other_msg.sender_name.as_deref().unwrap_or("");
             if other_sender != sender {
                 continue;
             }
-            let other_ts = messages[j].timestamp_ms.unwrap_or(0);
+            let other_ts = other_msg.timestamp_ms.unwrap_or(0);
             if (other_ts - ts).abs() > window_ms {
                 continue;
             }

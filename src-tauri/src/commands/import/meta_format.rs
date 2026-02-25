@@ -12,9 +12,8 @@ pub static RE_ENCRYPTED: LazyLock<Regex> = LazyLock::new(|| {
 pub static RE_E2EE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)messages[/\\]e2ee_cutover[/\\][^/\\]+[/\\]message_\d+\.json$").unwrap()
 });
-pub static RE_SORT_NUM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"message_(\d+)\.json$").unwrap()
-});
+pub static RE_SORT_NUM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"message_(\d+)\.json$").unwrap());
 
 // ---- Meta export JSON deserialization types ----
 
