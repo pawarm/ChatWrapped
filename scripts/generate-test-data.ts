@@ -65,26 +65,6 @@ const MP4_PLACEHOLDER = Buffer.from([
   0x69, 0x73, 0x6f, 0x32, // compatible brand 'iso2'
 ]);
 
-function mediaBuffer(type: "photo" | "video" | "gif" | "audio" | "sticker"): Buffer {
-  switch (type) {
-    case "photo": return Math.random() > 0.5 ? PNG_1x1 : JPEG_1x1;
-    case "gif": return GIF_1x1;
-    case "sticker": return PNG_1x1;
-    case "video":
-    case "audio": return MP4_PLACEHOLDER;
-  }
-}
-
-function mediaExt(type: "photo" | "video" | "gif" | "audio" | "sticker"): string {
-  switch (type) {
-    case "photo": return ".jpg";
-    case "gif": return ".gif";
-    case "sticker": return ".png";
-    case "video":
-    case "audio": return ".mp4";
-  }
-}
-
 // ─── Meta mojibake encoding ────────────────────────────────────────────────────
 
 function metaEncode(text: string): string {
@@ -123,9 +103,6 @@ function randInt(min: number, max: number): number {
 
 // ─── Timestamp helpers ─────────────────────────────────────────────────────────
 
-const JAN_2024 = new Date("2024-01-01T00:00:00Z").getTime();
-const DEC_2024 = new Date("2024-12-31T23:59:59Z").getTime();
-
 function ts(dateStr: string): number {
   return new Date(dateStr).getTime();
 }
@@ -153,7 +130,7 @@ function nextMediaId(): string {
   return String(_mediaIdCounter++);
 }
 
-let _stickerIds = [
+const _stickerIds = [
   "369239263222822",
   "369239343222814",
   "369239383222810",
@@ -1358,7 +1335,6 @@ function buildLargeMom(): ConversationDef {
 }
 
 function buildWorkSarah(): ConversationDef {
-  const threadPath = "inbox/sarahwork_100004";
   const me = "Alex Chen";
   const sarah = "Sarah Mitchell";
   const mediaFiles: MediaFile[] = [];
@@ -1685,7 +1661,6 @@ function buildLargeHikers(): ConversationDef {
 }
 
 function buildStudyGroup(): ConversationDef {
-  const threadPath = "inbox/studygroup_100009";
   const me = "Alex Chen";
   const members = ["Emma Lee", "David Patel", "Sofia García", "James Wright", "Olivia Brown"];
   const all = [me, ...members];
@@ -1747,7 +1722,6 @@ function buildStudyGroup(): ConversationDef {
 }
 
 function buildRoommates(): ConversationDef {
-  const threadPath = "inbox/roommates_100010";
   const me = "Alex Chen";
   const members = ["Casey Taylor", "Morgan Lee"];
   const all = [me, ...members];
