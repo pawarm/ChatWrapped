@@ -18,6 +18,10 @@ jobs:
             platform: linux
           - os: macos-latest
             platform: macos
+            args: --target aarch64-apple-darwin
+          - os: macos-latest
+            platform: macos-intel
+            args: --target x86_64-apple-darwin
           - os: windows-latest
             platform: windows
     runs-on: ${{ matrix.os }}
@@ -26,24 +30,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: '20'
-          cache: 'npm'
+          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin' || matrix.platform == 'macos-intel' && 'x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install
 
-      # Import Developer ID certificate for macOS code signing (required for signing + notarization)
       - name: Import code signing certificate
-        if: matrix.platform == 'macos'
+        if: startsWith(matrix.platform, 'macos')
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
-            echo "CSC_LINK or CSC_KEY_PASSWORD not set - skipping certificate import (macOS build will be unsigned)"
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No certificate configured - build will be unsigned"
             exit 0
           fi
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -51,86 +67,24 @@ jobs:
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
-          echo "$CSC_LINK" | base64 --decode -o certificate.p12
-          security import certificate.p12 -k build.keychain -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          echo "$APPLE_CERTIFICATE" | base64 --decode -o certificate.p12
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
 
-      - name: Build
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "macos" ]; then
-            npm run make -- --arch=x64,arm64
-          else
-            npm run make
-          fi
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-      - name: Prepare release assets
-        id: prepare
-        shell: bash
-        run: |
-          set -e
-          shopt -s nullglob
-          VERSION=${GITHUB_REF#refs/tags/v}
-          mkdir -p release-assets
-
-          if [ "${{ matrix.platform }}" = "macos" ]; then
-            for f in out/make/zip/darwin/*/*.zip; do
-              arch=$(basename $(dirname "$f"))
-              cp "$f" "release-assets/ChatWrapped-${VERSION}-macos-${arch}.zip"
-            done
-          elif [ "${{ matrix.platform }}" = "windows" ]; then
-            for f in out/make/squirrel.windows/*/*.exe; do
-              cp "$f" "release-assets/ChatWrapped-${VERSION}-windows-x64.exe"
-              break
-            done
-          else
-            for f in out/make/deb/*/*.deb; do
-              [ -f "$f" ] && cp "$f" "release-assets/ChatWrapped-${VERSION}-linux-amd64.deb"
-              break
-            done
-            for f in out/make/rpm/*/*.rpm; do
-              [ -f "$f" ] && cp "$f" "release-assets/ChatWrapped-${VERSION}-linux-amd64.rpm"
-              break
-            done
-          fi
-
-          echo "Artifacts:"
-          ls -la release-assets/
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}
-          path: release-assets/
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-
-      - name: Flatten artifacts
-        run: |
-          mkdir -p release-assets
-          find release-artifacts -type f -exec cp {} release-assets/ \;
-          echo "Release assets:"
-          ls -la release-assets/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          generate_release_notes: true
-          files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tagName: ${{ github.ref_name }}
+          releaseName: ChatWrapped ${{ github.ref_name }}
+          releaseBody: ''
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

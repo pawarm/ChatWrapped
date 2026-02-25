@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { JumpToDateBar } from '@/components/conversation/JumpToDateBar';
 import { MessageView } from '@/components/conversation/MessageView';
 import { useDebounce } from '@/hooks/useDebounce';
+import { api } from '@/lib/api';
 import type { SearchResult, Thread } from '@/types/conversation';
 
 type SortKind = 'recent' | 'name';
@@ -79,7 +80,7 @@ export function ConversationsPage() {
   const fetchThreads = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await window.electronAPI.getThreads(debouncedSearch, sort);
+      const data = await api.getThreads(debouncedSearch, sort);
       setThreads(data);
     } finally {
       setLoading(false);
@@ -96,7 +97,7 @@ export function ConversationsPage() {
       return;
     }
     setSearching(true);
-    window.electronAPI
+    api
       .searchMessages(debouncedMessageSearch, 30)
       .then(setSearchResults)
       .finally(() => setSearching(false));
