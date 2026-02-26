@@ -1,15 +1,106 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
+  version:
+    name: Bump Version & Tag
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      skipped: ${{ steps.bump.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            CURRENT="0.0.0"
+            RANGE="HEAD"
+          else
+            CURRENT="${LATEST_TAG#v}"
+            RANGE="${LATEST_TAG}..HEAD"
+          fi
+
+          COMMITS=$(git log "$RANGE" --pretty=format:"%s" 2>/dev/null || echo "")
+
+          if [ -z "$COMMITS" ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "No new commits since $LATEST_TAG — skipping release"
+            exit 0
+          fi
+
+          NON_BUMP_COMMITS=$(echo "$COMMITS" | grep -v "^chore: bump version to" || true)
+          if [ -z "$NON_BUMP_COMMITS" ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "Only version bump commits since $LATEST_TAG — skipping release"
+            exit 0
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          BUMP="patch"
+          if echo "$COMMITS" | grep -qiE "^feat(\(.+\))?!:|BREAKING CHANGE"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
+            BUMP="minor"
+          fi
+
+          case $BUMP in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          echo "Bumping $CURRENT → $NEW_VERSION ($BUMP)"
+
+      - name: Update version files
+        if: steps.bump.outputs.skipped != 'true'
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
+
+      - name: Commit and tag
+        if: steps.bump.outputs.skipped != 'true'
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git tag "$TAG"
+          git push origin main --tags
+
   build:
+    name: Build (${{ matrix.platform }})
+    needs: version
+    if: needs.version.outputs.skipped != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -28,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ needs.version.outputs.tag }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -50,7 +141,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Import code signing certificate
         if: startsWith(matrix.platform, 'macos')
@@ -59,7 +150,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           if [ -z "$APPLE_CERTIFICATE" ]; then
-            echo "No certificate configured - build will be unsigned"
+            echo "No certificate configured — build will be unsigned"
             exit 0
           fi
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -82,8 +173,8 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ChatWrapped ${{ github.ref_name }}
+          tagName: ${{ needs.version.outputs.tag }}
+          releaseName: ChatWrapped ${{ needs.version.outputs.tag }}
           releaseBody: ''
           releaseDraft: true
           prerelease: false
