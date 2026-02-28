@@ -13,6 +13,9 @@ const ENCRYPTED_MESSAGE_PATTERN =
 const E2EE_CUTOVER_MESSAGE_PATTERN =
   /messages[/\\]e2ee_cutover[/\\][^/\\]+[/\\]message_(\d+)\.json$/i;
 
+const PROFILE_INFO_PATTERN =
+  /personal_information[/\\]profile_information[/\\]profile_information\.json$/i;
+
 interface MetaMessage {
   sender_name?: string;
   timestamp_ms?: number;
@@ -129,6 +132,80 @@ function groupEntriesByThread(
   return byThread;
 }
 
+interface ProfileInformationFile {
+  profile_v2?: {
+    name?: {
+      full_name?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+    emails?: {
+      emails?: string[];
+    };
+  };
+}
+
+function getAccountProfile(zip: AdmZip): {
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  primaryEmail?: string;
+} | undefined {
+  try {
+    const entry = zip
+      .getEntries()
+      .find((e) => !e.isDirectory && PROFILE_INFO_PATTERN.test(e.entryName));
+    if (!entry) return undefined;
+
+    const buffer = zip.readFile(entry);
+    if (!buffer?.length) return undefined;
+
+    const data = JSON.parse(buffer.toString("utf-8")) as ProfileInformationFile;
+    const p = data.profile_v2;
+ 
+    console.log("Extracted profile information:", {
+      fullName: p?.name?.full_name,
+      firstName: p?.name?.first_name,
+      lastName: p?.name?.last_name,
+      primaryEmail: p?.emails?.emails?.[0],
+    });
+    return {
+      fullName: p?.name?.full_name?.trim(),
+      firstName: p?.name?.first_name?.trim(),
+      lastName: p?.name?.last_name?.trim(),
+      primaryEmail: p?.emails?.emails?.[0]?.trim(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function saveAccountProfile(
+  database: Database.Database,
+  profile: { fullName?: string; firstName?: string; lastName?: string; primaryEmail?: string }
+): void {
+  database
+    .prepare(
+      `
+      INSERT INTO profile_info (id, full_name, first_name, last_name, primary_email, imported_at_ms)
+      VALUES (1, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        full_name = excluded.full_name,
+        first_name = excluded.first_name,
+        last_name = excluded.last_name,
+        primary_email = excluded.primary_email,
+        imported_at_ms = excluded.imported_at_ms
+      `
+    )
+    .run(
+      profile.fullName ?? null,
+      profile.firstName ?? null,
+      profile.lastName ?? null,
+      profile.primaryEmail ?? null,
+      Date.now()
+    );
+}
+
 export async function importZip(
   zipPath: string,
   database: Database.Database,
@@ -152,6 +229,11 @@ export async function importZip(
     zip = new AdmZip(normalizedPath);
   } catch {
     throw new Error('Invalid or corrupted ZIP file.');
+  }
+
+  const profile = getAccountProfile(zip);
+  if (profile) {
+    saveAccountProfile(database, profile);
   }
 
   const entries = zip.getEntries();

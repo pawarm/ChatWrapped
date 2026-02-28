@@ -211,4 +211,31 @@ export function registerDbHandlers(getDbInstance: () => Database.Database): void
       }));
     }
   );
+
+  ipcMain.handle('db:getTopSenders', (_event, ownName?: string) => {
+    const db = getDbInstance();
+
+    const profileRow = db
+      .prepare('SELECT full_name FROM profile_info')
+      .get() as { full_name?: string } | undefined;
+
+    const ownerName = ownName?.trim() || profileRow?.full_name?.trim();
+    const hasOwner = !!ownerName;
+
+    console.log('Getting top senders, excluding owner: ', ownerName);
+    const sql = `
+      SELECT sender_name AS sender, COUNT(*) AS message_count
+      FROM messages
+      WHERE sender_name IS NOT NULL
+        AND TRIM(sender_name) <> ''
+        ${hasOwner ? 'AND LOWER(TRIM(sender_name)) <> LOWER(TRIM(?))' : ''}
+      GROUP BY sender_name
+      ORDER BY message_count DESC
+      LIMIT 3
+    `;
+
+    return hasOwner
+      ? db.prepare(sql).all(ownerName as string)
+      : db.prepare(sql).all();
+  });
 }

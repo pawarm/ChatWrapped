@@ -1,5 +1,5 @@
 import type { ImportProgress, ImportResult, ImportSummary } from './types/import';
-import type { Message, SearchResult, Thread } from './types/conversation';
+import type { Message, SearchResult, Thread, TopSender } from './types/conversation';
 
 declare global {
   interface Window {
@@ -10,11 +10,12 @@ declare global {
       getMessagesAroundDate: (threadId: string, timestampMs: number, limit?: number) => Promise<Message[]>;
       searchMessages: (query: string, limit?: number) => Promise<SearchResult[]>;
       onImportProgress: (callback: (p: ImportProgress) => void) => () => void;
+      getTopSenders: (ownName?: string) => Promise<TopSender[]>;
     };
   }
 }
 
 export type { ImportProgress, ImportResult, ImportSummary };
-export type { Message, SearchResult, Thread };
+export type { Message, SearchResult, Thread, TopSender };
 
 export {};

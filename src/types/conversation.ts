@@ -27,3 +27,5 @@ export interface SearchResult {
   content: string | null;
   snippet?: string;
 }
+
+export type TopSender = {sender: string; message_count: number};

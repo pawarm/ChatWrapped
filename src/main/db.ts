@@ -44,6 +44,15 @@ function initSchema(database: Database.Database): void {
       FOREIGN KEY (message_id) REFERENCES messages(id)
     );
 
+    CREATE TABLE IF NOT EXISTS profile_info (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      full_name TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      primary_email TEXT,
+      imported_at_ms INTEGER NOT NULL
+  );
+
     CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp_ms);
     CREATE INDEX IF NOT EXISTS idx_reactions_message_id ON reactions(message_id);

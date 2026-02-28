@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('import:progress', handler);
     };
   },
+  getTopSenders: (ownName?: string) => ipcRenderer.invoke('db:getTopSenders', ownName),
 });
